@@ -16,7 +16,7 @@ Install_Flags          = DESTDIR=$(DSTROOT)
 MAJOR     = 1
 MINOR     = 8
 VERSION   = $(MAJOR).$(MINOR)
-SYSSTRING = universal-darwin`uname -r | cut -d. -f1-2`
+SYSSTRING = `uname -p`-darwin`uname -r | cut -d. -f1-2`
 
 post-install:
 	$(STRIP) -x $(DSTROOT)/usr/bin/ruby
@@ -53,10 +53,8 @@ AEP_Patches    = patch-configure \
                  patch-ext__socket__extconf.rb \
                  patch-ext__socket__socket.c \
                  patch-ext__zlib__extconf.rb \
-                 patch-lib__cgi.rb \
                  patch-lib__mkmf.rb \
-                 PR3917782.diff \
-                 PR4224980.diff
+                 PR3917782.diff
 
 ifeq ($(suffix $(AEP_Filename)),.bz2)
 AEP_ExtractOption = j

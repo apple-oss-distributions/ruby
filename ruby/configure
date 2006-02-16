@@ -15017,11 +15017,9 @@ _ACEOF
 _ACEOF
 
 else
-    arch="universal-${target_os}"
+    arch="${target_cpu}-${target_os}"
     cat >>confdefs.h <<_ACEOF
 #define RUBY_PLATFORM "${arch}"
-#define RUBY_THIN_ARCHLIB "${RUBY_LIB_PATH}/powerpc-${target_os}"
-#define RUBY_SITE_THIN_ARCHLIB "${RUBY_SITE_LIB_PATH2}/powerpc-${target_os}"
 _ACEOF
 
 fi
