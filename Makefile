@@ -55,7 +55,8 @@ AEP_Patches    = patch-configure \
                  patch-ext__zlib__extconf.rb \
                  patch-lib__mkmf.rb \
                  PR3917782.diff \
-                 PR4224980.diff
+                 PR4224980.diff \
+                 CAN-2005-2337.diff
 
 ifeq ($(suffix $(AEP_Filename)),.bz2)
 AEP_ExtractOption = j
