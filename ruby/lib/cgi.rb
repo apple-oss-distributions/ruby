@@ -284,7 +284,7 @@ class CGI
   # Standard internet newline sequence
   EOL = CR + LF
 
-  REVISION = '$Id: cgi.rb,v 1.68.2.9 2004/11/01 23:53:48 matz Exp $' #:nodoc:
+  REVISION = '$Id: cgi.rb 12340 2007-05-22 21:58:09Z shyouhei $' #:nodoc:
 
   NEEDS_BINMODE = true if /WIN/ni.match(RUBY_PLATFORM) 
 
@@ -367,13 +367,13 @@ class CGI
   #   CGI::unescapeHTML("Usage: foo &quot;bar&quot; &lt;baz&gt;")
   #      # => "Usage: foo \"bar\" <baz>"
   def CGI::unescapeHTML(string)
-    string.gsub(/&(.*?);/n) do
+    string.gsub(/&(amp|quot|gt|lt|\#[0-9]+|\#x[0-9A-Fa-f]+);/n) do
       match = $1.dup
       case match
-      when /\Aamp\z/ni           then '&'
-      when /\Aquot\z/ni          then '"'
-      when /\Agt\z/ni            then '>'
-      when /\Alt\z/ni            then '<'
+      when 'amp'                 then '&'
+      when 'quot'                then '"'
+      when 'gt'                  then '>'
+      when 'lt'                  then '<'
       when /\A#0*(\d+)\z/n       then
         if Integer($1) < 256
           Integer($1).chr
@@ -556,7 +556,8 @@ class CGI
     end
 
     options.delete("nph") if defined?(MOD_RUBY)
-    if options.delete("nph") or /IIS/n.match(env_table['SERVER_SOFTWARE'])
+    if options.delete("nph") or
+        (/IIS\/(\d+)/n.match(env_table['SERVER_SOFTWARE']) and $1.to_i < 5)
       buf += (env_table["SERVER_PROTOCOL"] or "HTTP/1.0")  + " " +
              (HTTP_STATUS[options["status"]] or options["status"] or "200 OK") +
              EOL +
@@ -708,13 +709,13 @@ class CGI
       require "nkf"
       case options["charset"]
       when /iso-2022-jp/ni
-        content = NKF::nkf('-j', content)
+        content = NKF::nkf('-m0 -x -j', content)
         options["language"] = "ja" unless options.has_key?("language")
       when /euc-jp/ni
-        content = NKF::nkf('-e', content)
+        content = NKF::nkf('-m0 -x -e', content)
         options["language"] = "ja" unless options.has_key?("language")
       when /shift_jis/ni
-        content = NKF::nkf('-s', content)
+        content = NKF::nkf('-m0 -x -s', content)
         options["language"] = "ja" unless options.has_key?("language")
       end
     end
@@ -770,7 +771,7 @@ class CGI
   #   cookie1.domain  = 'domain'
   #   cookie1.expires = Time.now + 30
   #   cookie1.secure  = true
-  class Cookie < SimpleDelegator
+  class Cookie < DelegateClass(Array)
 
     # Create a new CGI::Cookie object.
     #
@@ -870,15 +871,16 @@ class CGI
     cookies = Hash.new([])
     return cookies unless raw_cookie
 
-    raw_cookie.split(/; /).each do |pairs|
+    raw_cookie.split(/[;,]\s?/).each do |pairs|
       name, values = pairs.split('=',2)
       next unless name and values
       name = CGI::unescape(name)
       values ||= ""
       values = values.split('&').collect{|v| CGI::unescape(v) }
-      unless cookies.has_key?(name)
-        cookies[name] = Cookie::new({ "name" => name, "value" => values })
+      if cookies.has_key?(name)
+        values = cookies[name].value + values
       end
+      cookies[name] = Cookie::new({ "name" => name, "value" => values })
     end
 
     cookies
@@ -966,8 +968,10 @@ class CGI
     def read_multipart(boundary, content_length)
       params = Hash.new([])
       boundary = "--" + boundary
+      quoted_boundary = Regexp.quote(boundary, "n")
       buf = ""
       bufsize = 10 * 1024
+      boundary_end=""
 
       # start multipart/form-data
       stdinput.binmode if defined? stdinput.binmode
@@ -996,7 +1000,7 @@ class CGI
         end
         body.binmode if defined? body.binmode
 
-        until head and /#{boundary}(?:#{EOL}|--)/n.match(buf)
+        until head and /#{quoted_boundary}(?:#{EOL}|--)/n.match(buf)
 
           if (not head) and /#{EOL}#{EOL}/n.match(buf)
             buf = buf.sub(/\A((?:.|\n)*?#{EOL})#{EOL}/n) do
@@ -1016,25 +1020,26 @@ class CGI
               else
                 stdinput.read(content_length)
               end
-          if c.nil?
+          if c.nil? || c.empty?
             raise EOFError, "bad content body"
           end
           buf.concat(c)
           content_length -= c.size
         end
 
-        buf = buf.sub(/\A((?:.|\n)*?)(?:[\r\n]{1,2})?#{boundary}([\r\n]{1,2}|--)/n) do
+        buf = buf.sub(/\A((?:.|\n)*?)(?:[\r\n]{1,2})?#{quoted_boundary}([\r\n]{1,2}|--)/n) do
           body.print $1
           if "--" == $2
             content_length = -1
           end
+         boundary_end = $2.dup
           ""
         end
 
         body.rewind
 
-        /Content-Disposition:.* filename="?([^\";]*)"?/ni.match(head)
-	filename = ($1 or "")
+        /Content-Disposition:.* filename=(?:"((?:\\.|[^\"])*)"|([^;]*))/ni.match(head)
+	filename = ($1 or $2 or "")
 	if /Mac/ni.match(env_table['HTTP_USER_AGENT']) and
 	    /Mozilla/ni.match(env_table['HTTP_USER_AGENT']) and
 	    (not /MSIE/ni.match(env_table['HTTP_USER_AGENT']))
@@ -1059,8 +1064,9 @@ class CGI
           params[name] = [body]
         end
         break if buf.size == 0
-        break if content_length === -1
+        break if content_length == -1
       end
+      raise EOFError, "bad boundary end of body part" unless boundary_end=~/--/
 
       params
     end # read_multipart
@@ -1157,6 +1163,7 @@ class CGI
     # retrieved; use #params() to get the array of values.
     def [](key)
       params = @params[key]
+      return '' unless params
       value = params[0]
       if @multipart
         if value
