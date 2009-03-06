@@ -50,6 +50,9 @@
 /* We need this for `regex.h', and perhaps for the Emacs include files.  */
 # include <sys/types.h>
 #endif
+#ifdef HAVE_STDLIB_H
+# include <stdlib.h>
+#endif
 
 #if !defined(__STDC__) && !defined(_MSC_VER)
 # define volatile
@@ -63,6 +66,10 @@
 
 #ifdef RUBY_PLATFORM
 #include "defines.h"
+#undef xmalloc
+#undef xrealloc
+#undef xcalloc
+#undef xfree
 
 # define RUBY
 extern int rb_prohibit_interrupt;
@@ -104,6 +111,11 @@ void *alloca ();
 # include <strings.h>
 #endif
 
+#define xmalloc     malloc
+#define xrealloc    realloc
+#define xcalloc     calloc
+#define xfree       free
+
 #ifdef C_ALLOCA
 #define FREE_VARIABLES() alloca(0)
 #else
@@ -127,10 +139,12 @@ void *alloca ();
   unsigned int xlen = stacke - stackb; 					\
   if (stackb == stacka) {						\
     stackx = (type*)xmalloc(2 * xlen * sizeof(type));			\
+    if (!stackx) goto memory_exhausted;					\
     memcpy(stackx, stackb, xlen * sizeof (type));			\
   }									\
   else {								\
     stackx = (type*)xrealloc(stackb, 2 * xlen * sizeof(type));		\
+    if (!stackx) goto memory_exhausted;					\
   }									\
   /* Rearrange the pointers. */						\
   stackp = stackx + (stackp - stackb);					\
@@ -164,7 +178,7 @@ static void store_jump _((char*, int, char*));
 static void insert_jump _((int, char*, char*, char*));
 static void store_jump_n _((char*, int, char*, unsigned));
 static void insert_jump_n _((int, char*, char*, char*, unsigned));
-static void insert_op _((int, char*, char*));
+/*static void insert_op _((int, char*, char*));*/
 static void insert_op_2 _((int, char*, char*, int, int));
 static int memcmp_translate _((unsigned char*, unsigned char*, int));
 
@@ -508,6 +522,7 @@ utf8_firstbyte(c)
 #endif
 }
 
+#if 0
 static void
 print_mbc(c)
      unsigned int c;
@@ -538,6 +553,7 @@ print_mbc(c)
     printf("%c%c", (int)(c >> BYTEWIDTH), (int)(c &0xff));
   }
 }
+#endif
 
 /* If the buffer isn't allocated when it comes in, use this.  */
 #define INIT_BUF_SIZE  28
@@ -752,6 +768,7 @@ is_in_list(c, b)
   return is_in_list_sbc(c, b) || (current_mbctype ? is_in_list_mbc(c, b) : 0);
 }
 
+#if 0
 static void
 print_partial_compiled_pattern(start, end)
     unsigned char *start;
@@ -1006,6 +1023,7 @@ print_compiled_pattern(bufp)
 
   print_partial_compiled_pattern(buffer, buffer + bufp->used);
 }
+#endif
 
 static char*
 calculate_must_string(start, end)
@@ -1208,7 +1226,7 @@ read_special(p, pend, pp)
    the `struct re_pattern_buffer' that bufp pointed to, after
    re_compile_pattern returns. */
 
-char *
+const char *
 re_compile_pattern(pattern, size, bufp)
      const char *pattern;
      int size;
@@ -2580,6 +2598,7 @@ insert_jump_n(op, from, to, current_end, n)
 }
 
 
+#if 0
 /* Open up space at location THERE, and insert operation OP.
    CURRENT_END gives the end of the storage in use, so
    we know how much data to copy up.
@@ -2599,6 +2618,7 @@ insert_op(op, there, current_end)
 
   there[0] = (char)op;
 }
+#endif
 
 
 /* Open up space at location THERE, and insert operation OP followed by
@@ -2769,8 +2789,8 @@ bm_search(little, llen, big, blen, skip, translate)
    The caller must supply the address of a (1 << BYTEWIDTH)-byte data 
    area as bufp->fastmap.
    The other components of bufp describe the pattern to be used.  */
-void
-re_compile_fastmap(bufp)
+static int
+re_compile_fastmap0(bufp)
      struct re_pattern_buffer *bufp;
 {
   unsigned char *pattern = (unsigned char*)bufp->buffer;
@@ -2938,7 +2958,7 @@ re_compile_fastmap(bufp)
 	    fastmap[j] = 1;
 	}
 	if (bufp->can_be_null) {
-	  FREE_AND_RETURN_VOID(stackb);
+	  FREE_AND_RETURN(stackb, 0);
 	}
 	/* Don't return; check the alternative paths
 	   so we can set can_be_null if appropriate.  */
@@ -3104,10 +3124,41 @@ re_compile_fastmap(bufp)
     else
       break;
   }
-  FREE_AND_RETURN_VOID(stackb);
+  FREE_AND_RETURN(stackb, 0);
+ memory_exhausted:
+  FREE_AND_RETURN(stackb, -2);
+}
+
+void
+re_compile_fastmap(bufp)
+     struct re_pattern_buffer *bufp;
+{
+  (void)re_compile_fastmap0(bufp);
 }
 
 /* adjust startpos value to the position between characters. */
+int
+re_mbc_startpos(string, size, startpos, range)
+     const char *string;
+     int size, startpos, range;
+{
+  int i = mbc_startpos(string, startpos);
+
+  if (i < startpos) {
+    if (range > 0) {
+      startpos = i + mbclen(string[i]);
+    }
+    else {
+      int len = mbclen(string[i]);
+      if (i + len <= startpos)
+	startpos = i + len;
+      else
+	startpos = i;
+    }
+  }
+  return startpos;
+}
+
 int
 re_adjust_startpos(bufp, string, size, startpos, range)
      struct re_pattern_buffer *bufp;
@@ -3116,25 +3167,13 @@ re_adjust_startpos(bufp, string, size, startpos, range)
 {
   /* Update the fastmap now if not correct already.  */
   if (!bufp->fastmap_accurate) {
-    re_compile_fastmap(bufp);
+    int ret = re_compile_fastmap0(bufp);
+    if (ret) return ret;
   }
 
   /* Adjust startpos for mbc string */
   if (current_mbctype && startpos>0 && !(bufp->options&RE_OPTIMIZE_BMATCH)) {
-    int i = mbc_startpos(string, startpos);
-
-    if (i < startpos) {
-      if (range > 0) {
-	startpos = i + mbclen(string[i]);
-      }
-      else {
-	int len = mbclen(string[i]);
-	if (i + len <= startpos)
-	  startpos = i + len;
-	else
-	  startpos = i;
-      }
-    }
+    startpos = re_mbc_startpos(string, size, startpos, range);
   }
   return startpos;
 }
@@ -3168,10 +3207,15 @@ re_search(bufp, string, size, startpos, range, regs)
   /* Check for out-of-range starting position.  */
   if (startpos < 0  ||  startpos > size)
     return -1;
+  if (!string) {
+    if (size == 0) string = "";
+    else return -1;
+  }
 
   /* Update the fastmap now if not correct already.  */
   if (fastmap && !bufp->fastmap_accurate) {
-    re_compile_fastmap(bufp);
+    int ret = re_compile_fastmap0(bufp);
+    if (ret) return ret;
   }
 
 
@@ -3561,7 +3605,7 @@ re_match_exec(bufp, string_arg, size, pos, beg, regs)
      ``dummy''; if a failure happens and the failure point is a dummy, it
      gets discarded and the next next one is tried.  */
 
-  unsigned char **stacka;
+  unsigned char **const stacka = 0;
   unsigned char **stackb;
   unsigned char **stackp;
   unsigned char **stacke;
@@ -3610,8 +3654,7 @@ re_match_exec(bufp, string_arg, size, pos, beg, regs)
   }
 
   /* Initialize the stack. */
-  stacka = RE_TALLOC(MAX_NUM_FAILURE_ITEMS * NFAILURES, unsigned char*);
-  stackb = stacka;
+  stackb = TMALLOC(MAX_NUM_FAILURE_ITEMS * NFAILURES, unsigned char*);
   stackp = stackb;
   stacke = &stackb[MAX_NUM_FAILURE_ITEMS * NFAILURES];
 
@@ -4381,6 +4424,8 @@ re_match_exec(bufp, string_arg, size, pos, beg, regs)
     goto restore_best_regs;
 
   FREE_AND_RETURN(stackb,(-1)); 	/* Failure to match.  */
+ memory_exhausted:
+  FREE_AND_RETURN(stackb,(-2));
 }
 
 
@@ -4644,5 +4689,5 @@ utf8_startpos(string, pos)
   mode		 : C
   c-file-style	 : "gnu"
   tab-width	 : 8
-  End		 :
+  End
 */

@@ -12,9 +12,6 @@
 #include <ruby.h>
 #include <intern.h>
 #include <rubysig.h>
-#include <node.h>
-
-enum rb_thread_status rb_thread_status _((VALUE));
 
 static VALUE rb_cMutex;
 static VALUE rb_cConditionVariable;
@@ -24,11 +21,12 @@ static VALUE rb_cSizedQueue;
 static VALUE set_critical(VALUE value);
 
 static VALUE
-thread_exclusive_do(void)
+thread_exclusive(VALUE (*func)(ANYARGS), VALUE arg)
 {
-    rb_thread_critical = 1;
+    VALUE critical = rb_thread_critical;
 
-    return rb_yield(Qundef);
+    rb_thread_critical = 1;
+    return rb_ensure(func, arg, set_critical, (VALUE)critical);
 }
 
 /*
@@ -43,7 +41,7 @@ thread_exclusive_do(void)
 static VALUE
 rb_thread_exclusive(void)
 {
-    return rb_ensure(thread_exclusive_do, Qundef, set_critical, rb_thread_critical);
+    return thread_exclusive(rb_yield, Qundef);
 }
 
 typedef struct _Entry {
@@ -147,7 +145,7 @@ shift_list(List *list)
     VALUE value;
 
     entry = list->entries;
-    if (!entry) return Qundef;
+    if (!entry) return Qnil;
 
     list->entries = entry->next;
     if (entry == list->last_entry) {
@@ -229,9 +227,7 @@ wake_one(List *list)
 
     waking = Qnil;
     while (list->entries && !RTEST(waking)) {
-	waking = shift_list(list);
-	if (waking == Qundef) break;
-	waking = wake_thread(waking);
+	waking = wake_thread(shift_list(list));
     }
 
     return waking;
@@ -262,27 +258,19 @@ wait_list_cleanup(List *list)
     return Qnil;
 }
 
-static void
+static VALUE
 wait_list(List *list)
 {
-    rb_ensure(wait_list_inner, (VALUE)list, wait_list_cleanup, (VALUE)list);
+    return rb_ensure(wait_list_inner, (VALUE)list, wait_list_cleanup, (VALUE)list);
 }
 
 static void
-assert_no_survivors(List *waiting, const char *label, void *addr)
+kill_waiting_threads(List *waiting)
 {
     Entry *entry;
-    VALUE ths = 0;
 
     for (entry = waiting->entries; entry; entry = entry->next) {
-	if (RTEST(wake_thread(entry->value))) {
-	    if (!ths) ths = rb_ary_new();
-	    rb_ary_push(ths, entry->value);
-	}
-    }
-    if (ths) {
-	rb_bug("%s %p freed with live thread(s) %s waiting",
-	       label, addr, RSTRING_PTR(rb_inspect(ths)));
+	rb_thread_kill(entry->value);
     }
 }
 
@@ -334,7 +322,7 @@ finalize_mutex(Mutex *mutex)
 static void
 free_mutex(Mutex *mutex)
 {
-    assert_no_survivors(&mutex->waiting, "mutex", mutex);
+    kill_waiting_threads(&mutex->waiting);
     finalize_mutex(mutex);
     xfree(mutex);
 }
@@ -422,9 +410,8 @@ lock_mutex(Mutex *mutex)
 	mutex->owner = current;
     }
     else {
-	push_list(&mutex->waiting, current);
 	do {
-	    rb_thread_stop();
+	    wait_list(&mutex->waiting);
 	    rb_thread_critical = 1;
 	    if (!MUTEX_LOCKED_P(mutex)) {
 		mutex->owner = current;
@@ -444,22 +431,6 @@ rb_mutex_lock(VALUE self)
     Data_Get_Struct(self, Mutex, mutex);
     lock_mutex(mutex);
     return self;
-}
-
-static VALUE
-relock_mutex(Mutex *mutex)
-{
-    VALUE current = rb_thread_current();
-
-    switch (rb_thread_status(current)) {
-      case THREAD_RUNNABLE:
-      case THREAD_STOPPED:
-	lock_mutex(mutex);
-	break;
-      default:
-	break;
-    }
-    return Qundef;
 }
 
 /*
@@ -494,10 +465,8 @@ set_critical(VALUE value)
 static VALUE
 unlock_mutex(Mutex *mutex)
 {
-    VALUE waking;
+    VALUE waking = thread_exclusive(unlock_mutex_inner, (VALUE)mutex);
 
-    rb_thread_critical = 1;
-    waking = rb_ensure(unlock_mutex_inner, (VALUE)mutex, set_critical, 0);
     if (!RTEST(waking)) {
         return Qfalse;
     }
@@ -545,10 +514,9 @@ rb_mutex_exclusive_unlock(VALUE self)
     VALUE waking;
     Data_Get_Struct(self, Mutex, mutex);
 
-    rb_thread_critical = 1;
-    waking = rb_ensure(rb_mutex_exclusive_unlock_inner, (VALUE)mutex, set_critical, 0);
+    waking = thread_exclusive(rb_mutex_exclusive_unlock_inner, (VALUE)mutex);
 
-    if (waking == Qundef || !RTEST(waking)) {
+    if (!RTEST(waking)) {
         return Qnil;
     }
 
@@ -623,7 +591,7 @@ finalize_condvar(ConditionVariable *condvar)
 static void
 free_condvar(ConditionVariable *condvar)
 {
-    assert_no_survivors(&condvar->waiting, "condition variable", condvar);
+    kill_waiting_threads(&condvar->waiting);
     finalize_condvar(condvar);
     xfree(condvar);
 }
@@ -675,7 +643,7 @@ wait_condvar(ConditionVariable *condvar, Mutex *mutex)
     if (RTEST(waking)) {
 	wake_thread(waking);
     }
-    rb_ensure(wait_list, (VALUE)&condvar->waiting, relock_mutex, (VALUE)mutex);
+    rb_ensure(wait_list, (VALUE)&condvar->waiting, lock_mutex, (VALUE)mutex);
 }
 
 static VALUE
@@ -733,8 +701,7 @@ rb_condvar_broadcast(VALUE self)
 
     Data_Get_Struct(self, ConditionVariable, condvar);
   
-    rb_thread_critical = 1;
-    rb_ensure(wake_all, (VALUE)&condvar->waiting, set_critical, 0);
+    thread_exclusive(wake_all, (VALUE)&condvar->waiting);
     rb_thread_schedule();
 
     return self;
@@ -751,9 +718,8 @@ rb_condvar_broadcast(VALUE self)
 static void
 signal_condvar(ConditionVariable *condvar)
 {
-    VALUE waking;
-    rb_thread_critical = 1;
-    waking = rb_ensure(wake_one, (VALUE)&condvar->waiting, set_critical, 0);
+    VALUE waking = thread_exclusive(wake_one, (VALUE)&condvar->waiting);
+
     if (RTEST(waking)) {
         run_thread(waking);
     }
@@ -828,9 +794,9 @@ finalize_queue(Queue *queue)
 static void
 free_queue(Queue *queue)
 {
-    assert_no_survivors(&queue->mutex.waiting, "queue", queue);
-    assert_no_survivors(&queue->space_available.waiting, "queue", queue);
-    assert_no_survivors(&queue->value_available.waiting, "queue", queue);
+    kill_waiting_threads(&queue->mutex.waiting);
+    kill_waiting_threads(&queue->space_available.waiting);
+    kill_waiting_threads(&queue->value_available.waiting);
     finalize_queue(queue);
     xfree(queue);
 }

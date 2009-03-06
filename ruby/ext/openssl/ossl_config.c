@@ -1,5 +1,5 @@
 /*
- * $Id: ossl_config.c 11708 2007-02-12 23:01:19Z shyouhei $
+ * $Id: ossl_config.c 12821 2007-07-20 06:22:54Z nobu $
  * 'OpenSSL for Ruby' project
  * Copyright (C) 2001-2002  Michal Rokos <m.rokos@sh.cvut.cz>
  * All rights reserved.
@@ -171,16 +171,16 @@ ossl_config_add_value(VALUE self, VALUE section, VALUE name, VALUE value)
     StringValue(name);
     StringValue(value);
     GetConfig(self, conf);
-    if(!(sv = _CONF_get_section(conf, RSTRING(section)->ptr))){
-	if(!(sv = _CONF_new_section(conf, RSTRING(section)->ptr))){
+    if(!(sv = _CONF_get_section(conf, RSTRING_PTR(section)))){
+	if(!(sv = _CONF_new_section(conf, RSTRING_PTR(section)))){
 	    ossl_raise(eConfigError, NULL);
 	}
     }
     if(!(cv = OPENSSL_malloc(sizeof(CONF_VALUE)))){
 	ossl_raise(eConfigError, NULL);
     }
-    cv->name = BUF_strdup(RSTRING(name)->ptr);
-    cv->value = BUF_strdup(RSTRING(value)->ptr);
+    cv->name = BUF_strdup(RSTRING_PTR(name));
+    cv->value = BUF_strdup(RSTRING_PTR(value));
     if(!cv->name || !cv->value || !_CONF_add_string(conf, sv, cv)){
 	OPENSSL_free(cv->name);
 	OPENSSL_free(cv->value);
@@ -201,7 +201,7 @@ ossl_config_get_value(VALUE self, VALUE section, VALUE name)
     StringValue(section);
     StringValue(name);
     GetConfig(self, conf);
-    str = NCONF_get_string(conf, RSTRING(section)->ptr, RSTRING(name)->ptr);
+    str = NCONF_get_string(conf, RSTRING_PTR(section), RSTRING_PTR(name));
     if(!str){
 	ERR_clear_error();
 	return Qnil;
@@ -245,8 +245,11 @@ set_conf_section_i(VALUE i, VALUE *arg)
 static VALUE
 ossl_config_set_section(VALUE self, VALUE section, VALUE hash)
 {
-    VALUE arg[2] = { self, section };
-    rb_iterate(rb_each, hash, set_conf_section_i, (VALUE)arg);
+    VALUE arg[2];
+
+    arg[0] = self;
+    arg[1] = section;
+    rb_block_call(hash, rb_intern("each"), 0, 0, set_conf_section_i, (VALUE)arg);
     return hash;
 }
 

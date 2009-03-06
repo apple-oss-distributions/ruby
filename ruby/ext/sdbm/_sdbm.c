@@ -8,7 +8,7 @@
  */
 
 #ifndef lint
-/*char sdbm_rcsid[] = "$Id: _sdbm.c 11708 2007-02-12 23:01:19Z shyouhei $";*/
+/*char sdbm_rcsid[] = "$Id: _sdbm.c 12800 2007-07-15 13:24:51Z nobu $";*/
 #endif
 
 #include "sdbm.h"
@@ -71,7 +71,7 @@ static int   duppair proto((char *, datum));
 
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef MSDOS
+#ifdef DOSISH
 #include <io.h>
 #endif
 #include <sys/types.h>
@@ -626,7 +626,7 @@ register DBM *db;
  */
 
 #ifndef lint
-/*char pair_rcsid[] = "$Id: _sdbm.c 11708 2007-02-12 23:01:19Z shyouhei $";*/
+/*char pair_rcsid[] = "$Id: _sdbm.c 12800 2007-07-15 13:24:51Z nobu $";*/
 #endif
 
 #ifndef BSD42

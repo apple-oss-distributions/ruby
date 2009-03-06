@@ -3,7 +3,7 @@
   intern.h -
 
   $Author: shyouhei $
-  $Date: 2007-06-07 21:40:01 +0900 (Thu, 07 Jun 2007) $
+  $Date: 2008-07-07 12:29:28 +0900 (Mon, 07 Jul 2008) $
   created at: Thu Jun 10 14:22:17 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -114,6 +114,7 @@ VALUE rb_mod_ancestors _((VALUE));
 VALUE rb_class_instance_methods _((int, VALUE*, VALUE));
 VALUE rb_class_public_instance_methods _((int, VALUE*, VALUE));
 VALUE rb_class_protected_instance_methods _((int, VALUE*, VALUE));
+VALUE rb_big_rshift(VALUE, VALUE);
 VALUE rb_class_private_instance_methods _((int, VALUE*, VALUE));
 VALUE rb_obj_singleton_methods _((int, VALUE*, VALUE));
 void rb_define_method_id _((VALUE, ID, VALUE (*)(ANYARGS), int));
@@ -127,6 +128,14 @@ VALUE rb_singleton_class _((VALUE));
 int rb_cmpint _((VALUE, VALUE, VALUE));
 NORETURN(void rb_cmperr _((VALUE, VALUE)));
 /* enum.c */
+VALUE rb_block_call _((VALUE, ID, int, VALUE*, VALUE (*)(ANYARGS), VALUE));
+/* enumerator.c */
+VALUE rb_enumeratorize _((VALUE, VALUE, int, VALUE *));
+#define RETURN_ENUMERATOR(obj, argc, argv) do {				\
+	if (!rb_block_given_p())					\
+	    return rb_enumeratorize(obj, ID2SYM(rb_frame_this_func()),	\
+				    argc, argv);			\
+    } while (0)
 /* error.c */
 RUBY_EXTERN int ruby_nerrs;
 VALUE rb_exc_new _((VALUE, const char*, long));
@@ -171,6 +180,7 @@ void rb_interrupt _((void));
 VALUE rb_apply _((VALUE, ID, VALUE));
 void rb_backtrace _((void));
 ID rb_frame_last_func _((void));
+ID rb_frame_this_func _((void));
 VALUE rb_obj_instance_eval _((int, VALUE*, VALUE));
 VALUE rb_mod_module_eval _((int, VALUE*, VALUE));
 void rb_load _((VALUE, int));
@@ -183,8 +193,11 @@ VALUE rb_require_safe _((VALUE, int));
 void rb_obj_call_init _((VALUE, int, VALUE*));
 VALUE rb_class_new_instance _((int, VALUE*, VALUE));
 VALUE rb_block_proc _((void));
+VALUE rb_block_dup _((VALUE, VALUE, VALUE));
+VALUE rb_method_dup _((VALUE, VALUE, VALUE));
 VALUE rb_f_lambda _((void));
-VALUE rb_proc_new _((VALUE (*)(ANYARGS/* VALUE yieldarg[, VALUE procarg] */), VALUE));
+VALUE rb_proc_call _((VALUE, VALUE));
+VALUE rb_obj_method _((VALUE, VALUE));
 VALUE rb_protect _((VALUE (*)(VALUE), VALUE, int*));
 void rb_set_end_proc _((void (*)(VALUE), VALUE));
 void rb_mark_end_proc _((void));
@@ -222,6 +235,7 @@ VALUE rb_thread_main _((void));
 VALUE rb_thread_local_aref _((VALUE, ID));
 VALUE rb_thread_local_aset _((VALUE, ID, VALUE));
 void rb_thread_atfork _((void));
+VALUE rb_exec_recursive _((VALUE(*)(VALUE, VALUE, int),VALUE,VALUE));
 VALUE rb_funcall_rescue __((VALUE, ID, int, ...));
 /* file.c */
 VALUE rb_file_s_expand_path _((int, VALUE *));
@@ -238,6 +252,7 @@ VALUE rb_file_directory_p _((VALUE,VALUE));
 NORETURN(void rb_memerror __((void)));
 int ruby_stack_check _((void));
 int ruby_stack_length _((VALUE**));
+int rb_during_gc _((void));
 char *rb_source_filename _((const char*));
 void rb_gc_mark_locations _((VALUE*, VALUE*));
 void rb_mark_tbl _((struct st_table*));
@@ -259,10 +274,11 @@ VALUE rb_hash _((VALUE));
 VALUE rb_hash_new _((void));
 VALUE rb_hash_freeze _((VALUE));
 VALUE rb_hash_aref _((VALUE, VALUE));
+VALUE rb_hash_lookup _((VALUE, VALUE));
 VALUE rb_hash_aset _((VALUE, VALUE, VALUE));
 VALUE rb_hash_delete_if _((VALUE));
 VALUE rb_hash_delete _((VALUE,VALUE));
-int rb_path_check _((char*));
+int rb_path_check _((const char*));
 int rb_env_path_tainted _((void));
 /* io.c */
 #define rb_defout rb_stdout
@@ -318,6 +334,7 @@ VALUE rb_class_real _((VALUE));
 VALUE rb_class_inherited_p _((VALUE, VALUE));
 VALUE rb_convert_type _((VALUE,int,const char*,const char*));
 VALUE rb_check_convert_type _((VALUE,int,const char*,const char*));
+VALUE rb_check_to_integer _((VALUE, const char *));
 VALUE rb_to_int _((VALUE));
 VALUE rb_Integer _((VALUE));
 VALUE rb_Float _((VALUE));
@@ -357,6 +374,9 @@ VALUE rb_detach_process _((int));
 VALUE rb_range_new _((VALUE, VALUE, int));
 VALUE rb_range_beg_len _((VALUE, long*, long*, long, int));
 VALUE rb_length_by_each _((VALUE));
+/* random.c */
+unsigned long rb_genrand_int32(void);
+double rb_genrand_real(void);
 /* re.c */
 int rb_memcmp _((const void*,const void*,long));
 int rb_memcicmp _((const void*,const void*,long));
@@ -399,6 +419,7 @@ const char *ruby_signal_name _((int));
 void ruby_default_signal _((int));
 /* sprintf.c */
 VALUE rb_f_sprintf _((int, VALUE*));
+VALUE rb_str_format _((int, VALUE*, VALUE));
 /* string.c */
 VALUE rb_str_new _((const char*, long));
 VALUE rb_str_new2 _((const char*));
@@ -409,6 +430,7 @@ VALUE rb_tainted_str_new _((const char*, long));
 VALUE rb_tainted_str_new2 _((const char*));
 VALUE rb_str_buf_new _((long));
 VALUE rb_str_buf_new2 _((const char*));
+VALUE rb_str_tmp_new _((long));
 VALUE rb_str_buf_append _((VALUE, VALUE));
 VALUE rb_str_buf_cat _((VALUE, const char*, long));
 VALUE rb_str_buf_cat2 _((VALUE, const char*));
@@ -423,6 +445,7 @@ VALUE rb_str_times _((VALUE, VALUE));
 VALUE rb_str_substr _((VALUE, long, long));
 void rb_str_modify _((VALUE));
 VALUE rb_str_freeze _((VALUE));
+void rb_str_set_len _((VALUE, long));
 VALUE rb_str_resize _((VALUE, long));
 VALUE rb_str_cat _((VALUE, const char*, long));
 VALUE rb_str_cat2 _((VALUE, const char*));
@@ -446,7 +469,7 @@ VALUE rb_struct_alloc _((VALUE, VALUE));
 VALUE rb_struct_aref _((VALUE, VALUE));
 VALUE rb_struct_aset _((VALUE, VALUE, VALUE));
 VALUE rb_struct_getmember _((VALUE, ID));
-VALUE rb_struct_iv_get _((VALUE, char*));
+VALUE rb_struct_iv_get _((VALUE, const char*));
 VALUE rb_struct_s_members _((VALUE));
 VALUE rb_struct_members _((VALUE));
 /* time.c */

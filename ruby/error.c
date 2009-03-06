@@ -3,7 +3,7 @@
   error.c -
 
   $Author: shyouhei $
-  $Date: 2007-05-23 01:28:10 +0900 (Wed, 23 May 2007) $
+  $Date: 2008-08-04 12:24:26 +0900 (Mon, 04 Aug 2008) $
   created at: Mon Aug  9 16:11:34 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -29,7 +29,7 @@
 #define EXIT_SUCCESS 0
 #endif
 
-extern const char ruby_version[], ruby_release_date[], ruby_platform[];
+extern const char *ruby_description;
 
 int ruby_nerrs;
 
@@ -208,8 +208,7 @@ rb_bug(fmt, va_alist)
 	va_init_list(args, fmt);
 	vfprintf(out, fmt, args);
 	va_end(args);
-	fprintf(out, "\nruby %s (%s) [%s]\n\n",
-		ruby_version, ruby_release_date, ruby_platform);
+	fprintf(out, "\n%s\n\n", ruby_description);
     }
     abort();
 }
@@ -258,7 +257,7 @@ rb_check_type(x, t)
     if (TYPE(x) != t) {
 	while (type->type >= 0) {
 	    if (type->type == t) {
-		char *etype;
+		const char *etype;
 
 		if (NIL_P(x)) {
 		    etype = "nil";
@@ -334,7 +333,7 @@ rb_exc_new3(etype, str)
     VALUE etype, str;
 {
     StringValue(str);
-    return rb_exc_new(etype, RSTRING(str)->ptr, RSTRING(str)->len);
+    return rb_funcall(etype, rb_intern("new"), 1, str);
 }
 
 /*
@@ -488,18 +487,18 @@ static VALUE
 exc_backtrace(exc)
     VALUE exc;
 {
-    ID bt = rb_intern("bt");
+    static ID bt;
 
-    if (!rb_ivar_defined(exc, bt)) return Qnil;
-    return rb_ivar_get(exc, bt);
+    if (!bt) bt = rb_intern("bt");
+    return rb_attr_get(exc, bt);
 }
 
-static VALUE
-check_backtrace(bt)
+VALUE
+rb_check_backtrace(bt)
     VALUE bt;
 {
     long i;
-    static char *err = "backtrace must be Array of String";
+    static const char err[] = "backtrace must be Array of String";
 
     if (!NIL_P(bt)) {
 	int t = TYPE(bt);
@@ -532,7 +531,7 @@ exc_set_backtrace(exc, bt)
     VALUE exc;
     VALUE bt;
 {
-    return rb_iv_set(exc, "bt", check_backtrace(bt));
+    return rb_iv_set(exc, "bt", rb_check_backtrace(bt));
 }
 
 /*
@@ -728,7 +727,7 @@ name_err_mesg_to_str(obj)
     mesg = ptr[0];
     if (NIL_P(mesg)) return Qnil;
     else {
-	char *desc = 0;
+	const char *desc = 0;
 	VALUE d = 0, args[3];
 
 	obj = ptr[1];
@@ -882,7 +881,7 @@ syserr_initialize(argc, argv, self)
 #if !defined(_WIN32) && !defined(__VMS)
     char *strerror();
 #endif
-    char *err;
+    const char *err;
     VALUE mesg, error;
     VALUE klass = rb_obj_class(self);
 
@@ -952,18 +951,16 @@ syserr_eqq(self, exc)
     VALUE self, exc;
 {
     VALUE num, e;
+    ID en = rb_intern("errno");
 
-    if (!rb_obj_is_kind_of(exc, rb_eSystemCallError)) return Qfalse;
-    if (self == rb_eSystemCallError) return Qtrue;
+    if (!rb_obj_is_kind_of(exc, rb_eSystemCallError)) {
+	if (!rb_respond_to(exc, en)) return Qfalse;
+    }
+    else if (self == rb_eSystemCallError) return Qtrue;
 
-    num = rb_attr_get(exc, rb_intern("errno"));
+    num = rb_attr_get(exc, en);
     if (NIL_P(num)) {
-	VALUE klass = CLASS_OF(exc);
-
-	while (TYPE(klass) == T_ICLASS || FL_TEST(klass, FL_SINGLETON)) {
-	    klass = (VALUE)RCLASS(klass)->super;
-	}
-	num = rb_const_get(klass, rb_intern("Errno"));
+	num = rb_funcall(exc, en, 0, 0);
     }
     e = rb_const_get(self, rb_intern("Errno"));
     if (FIXNUM_P(num) ? num == e : rb_equal(num, e))

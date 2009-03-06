@@ -3,7 +3,7 @@
   sprintf.c -
 
   $Author: shyouhei $
-  $Date: 2007-02-13 08:01:19 +0900 (Tue, 13 Feb 2007) $
+  $Date: 2008-06-20 08:12:46 +0900 (Fri, 20 Jun 2008) $
   created at: Fri Oct 15 10:39:26 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -18,6 +18,8 @@
 #include <math.h>
 
 #define BIT_DIGITS(N)   (((N)*146)/485 + 1)  /* log2(10) =~ 146/485 */
+#define BITSPERDIG (SIZEOF_BDIGITS*CHAR_BIT)
+#define EXTENDSIGN(n, l) (((~0 << (n)) >> (((n)*(l)) % BITSPERDIG)) & ~(~0 << (n)))
 
 static void fmt_setup _((char*,int,int,int,int));
 
@@ -36,7 +38,7 @@ remove_sign_bits(str, base)
 	}
     }
     else if (base == 8) {
-	if (*t == '3') t++;
+	*t |= EXTENDSIGN(3, strlen(t));
 	while (*t == '7') {
 	    t++;
 	}
@@ -82,6 +84,7 @@ sign_bits(base, p)
 #define FSPACE 16
 #define FWIDTH 32
 #define FPREC  64
+#define FPREC0 128
 
 #define CHECK(l) do {\
     while (blen + (l) >= bsiz) {\
@@ -110,9 +113,7 @@ sign_bits(base, p)
 #define GETNTHARG(nth) \
     ((nth >= argc) ? (rb_raise(rb_eArgError, "too few arguments"), 0) : argv[nth])
 
-#define GETASTER(val) do { \
-    t = p++; \
-    n = 0; \
+#define GETNUM(n, val) \
     for (; p < end && ISDIGIT(*p); p++) { \
 	int next_n = 10 * n + (*p - '0'); \
         if (next_n / 10 != n) {\
@@ -122,7 +123,12 @@ sign_bits(base, p)
     } \
     if (p >= end) { \
 	rb_raise(rb_eArgError, "malformed format string - %%*[0-9]"); \
-    } \
+    }
+
+#define GETASTER(val) do { \
+    t = p++; \
+    n = 0; \
+    GETNUM(n, val); \
     if (*p == '$') { \
 	tmp = GETPOSARG(n); \
     } \
@@ -243,7 +249,15 @@ rb_f_sprintf(argc, argv)
     int argc;
     VALUE *argv;
 {
+    return rb_str_format(argc - 1, argv + 1, GETNTHARG(0));
+}
+
+VALUE
+rb_str_format(argc, argv, fmt)
+    int argc;
+    VALUE *argv;
     VALUE fmt;
+{
     const char *p, *end;
     char *buf;
     int blen, bsiz;
@@ -257,7 +271,23 @@ rb_f_sprintf(argc, argv)
     VALUE tmp;
     VALUE str;
 
-    fmt = GETNTHARG(0);
+#define CHECK_FOR_WIDTH(f)				 \
+    if ((f) & FWIDTH) {					 \
+	rb_raise(rb_eArgError, "width given twice");	 \
+    }							 \
+    if ((f) & FPREC0) {					 \
+	rb_raise(rb_eArgError, "width after precision"); \
+    }
+#define CHECK_FOR_FLAGS(f)				 \
+    if ((f) & FWIDTH) {					 \
+	rb_raise(rb_eArgError, "flag after width");	 \
+    }							 \
+    if ((f) & FPREC0) {					 \
+	rb_raise(rb_eArgError, "flag after precision"); \
+    }
+
+    ++argc;
+    --argv;
     if (OBJ_TAINTED(fmt)) tainted = 1;
     StringValue(fmt);
     fmt = rb_str_new4(fmt);
@@ -292,26 +322,31 @@ rb_f_sprintf(argc, argv)
 	    break;
 
 	  case ' ':
+	    CHECK_FOR_FLAGS(flags);
 	    flags |= FSPACE;
 	    p++;
 	    goto retry;
 
 	  case '#':
+	    CHECK_FOR_FLAGS(flags);
 	    flags |= FSHARP;
 	    p++;
 	    goto retry;
 
 	  case '+':
+	    CHECK_FOR_FLAGS(flags);
 	    flags |= FPLUS;
 	    p++;
 	    goto retry;
 
 	  case '-':
+	    CHECK_FOR_FLAGS(flags);
 	    flags |= FMINUS;
 	    p++;
 	    goto retry;
 
 	  case '0':
+	    CHECK_FOR_FLAGS(flags);
 	    flags |= FZERO;
 	    p++;
 	    goto retry;
@@ -319,16 +354,7 @@ rb_f_sprintf(argc, argv)
 	  case '1': case '2': case '3': case '4':
 	  case '5': case '6': case '7': case '8': case '9':
 	    n = 0;
-	    for (; p < end && ISDIGIT(*p); p++) {
-		int next_n = 10 * n + (*p - '0');
-		if (next_n / 10 != n) {
-		    rb_raise(rb_eArgError, "width too big");
-		}
-		n = 10 * n + (*p - '0');
-	    }
-	    if (p >= end) {
-		rb_raise(rb_eArgError, "malformed format string - %%[0-9]");
-	    }
+	    GETNUM(n, width);
 	    if (*p == '$') {
 		if (nextvalue != Qundef) {
 		    rb_raise(rb_eArgError, "value given twice - %d$", n);
@@ -337,15 +363,13 @@ rb_f_sprintf(argc, argv)
 		p++;
 		goto retry;
 	    }
+	    CHECK_FOR_WIDTH(flags);
 	    width = n;
 	    flags |= FWIDTH;
 	    goto retry;
 
 	  case '*':
-	    if (flags & FWIDTH) {
-		rb_raise(rb_eArgError, "width given twice");
-	    }
-
+	    CHECK_FOR_WIDTH(flags);
 	    flags |= FWIDTH;
 	    GETASTER(width);
 	    if (width < 0) {
@@ -356,10 +380,10 @@ rb_f_sprintf(argc, argv)
 	    goto retry;
 
 	  case '.':
-	    if (flags & FPREC) {
+	    if (flags & FPREC0) {
 		rb_raise(rb_eArgError, "precision given twice");
 	    }
-	    flags |= FPREC;
+	    flags |= FPREC|FPREC0;
 
 	    prec = 0;
 	    p++;
@@ -372,17 +396,12 @@ rb_f_sprintf(argc, argv)
 		goto retry;
 	    }
 
-	    for (; p < end && ISDIGIT(*p); p++) {
-		prec = 10 * prec + (*p - '0');
-	    }
-	    if (p >= end) {
-		rb_raise(rb_eArgError, "malformed format string - %%.[0-9]");
-	    }
+	    GETNUM(prec, precision);
 	    goto retry;
 
 	  case '\n':
-	    p--;
 	  case '\0':
+	    p--;
 	  case '%':
 	    if (flags != FNONE) {
 		rb_raise(rb_eArgError, "illegal format character - %%");
@@ -455,13 +474,13 @@ rb_f_sprintf(argc, argv)
 	    {
 		volatile VALUE val = GETARG();
 		char fbuf[32], nbuf[64], *s, *t;
-		char *prefix = 0;
+		const char *prefix = 0;
 		int sign = 0;
 		char sc = 0;
 		long v = 0;
 		int base, bignum = 0;
 		int len, pos;
-		VALUE tmp;
+		volatile VALUE tmp;
                 volatile VALUE tmp1;
 
 		switch (*p) {
@@ -532,6 +551,7 @@ rb_f_sprintf(argc, argv)
 		  default:
 		    base = 10; break;
 		}
+
 		if (!bignum) {
 		    if (base == 2) {
 			val = rb_int2big(v);
@@ -677,7 +697,7 @@ rb_f_sprintf(argc, argv)
 		else {
 		    char c;
 
-		    if (bignum && !RBIGNUM(val)->sign)
+		    if (!sign && bignum && !RBIGNUM(val)->sign)
 			c = sign_bits(base, p);
 		    else
 			c = '0';
@@ -707,7 +727,7 @@ rb_f_sprintf(argc, argv)
 		fval = RFLOAT(rb_Float(val))->value;
 #if defined(_WIN32) && !defined(__BORLANDC__)
 		if (isnan(fval) || isinf(fval)) {
-		    char *expr;
+		    const char *expr;
 
 		    if  (isnan(fval)) {
 			expr = "NaN";
@@ -717,6 +737,8 @@ rb_f_sprintf(argc, argv)
 		    }
 		    need = strlen(expr);
 		    if ((!isnan(fval) && fval < 0.0) || (flags & FPLUS))
+			need++;
+		    else if (flags & FSPACE)
 			need++;
 		    if ((flags & FWIDTH) && need < width)
 			need = width;

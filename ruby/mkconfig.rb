@@ -5,7 +5,8 @@ $install_name ||= nil
 $so_name ||= nil
 
 srcdir = File.dirname(__FILE__)
-$:.replace [srcdir+"/lib", "."]
+$:.replace [srcdir+"/lib"] unless defined?(CROSS_COMPILING)
+$:.unshift(".")
 
 require "fileutils"
 mkconfig = File.basename($0)
@@ -68,12 +69,13 @@ File.foreach "config.status" do |line|
   end
 
   if name
-    next if /^(?:ac_.*|DEFS|configure_input|(?:top_)?srcdir|\w+OBJS)$/ =~ name
+    next if /^(?:ac_.*|configure_input|(?:top_)?srcdir|\w+OBJS)$/ =~ name
     next if /^\$\(ac_\w+\)$/ =~ val
     next if /^\$\{ac_\w+\}$/ =~ val
     next if /^\$ac_\w+$/ =~ val
     next if $install_name and /^RUBY_INSTALL_NAME$/ =~ name
     next if $so_name and /^RUBY_SO_NAME$/ =~  name
+    next if /^(?:X|(?:MINI|RUN)RUBY$)/ =~ name
     if /^program_transform_name$/ =~ name and /^s(\\?.)(.*)\1$/ =~ val
       next if $install_name
       sep = %r"#{Regexp.quote($1)}"
@@ -143,6 +145,8 @@ print <<EOS
   CONFIG["archdir"] = "$(rubylibdir)/$(arch)"
   CONFIG["sitelibdir"] = "$(sitedir)/$(ruby_version)"
   CONFIG["sitearchdir"] = "$(sitelibdir)/$(sitearch)"
+  CONFIG["vendorlibdir"] = "$(vendordir)/$(ruby_version)"
+  CONFIG["vendorarchdir"] = "$(vendorlibdir)/$(sitearch)"
   CONFIG["topdir"] = File.dirname(__FILE__)
   MAKEFILE_CONFIG = {}
   CONFIG.each{|k,v| MAKEFILE_CONFIG[k] = v.dup}

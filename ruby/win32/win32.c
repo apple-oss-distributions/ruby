@@ -21,12 +21,15 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <assert.h>
+#include <ctype.h>
 
 #include <windows.h>
 #include <winbase.h>
 #include <wincon.h>
+#include <shlobj.h>
 #ifdef __MINGW32__
 #include <mswsock.h>
+#include <mbstring.h>
 #endif
 #include "win32.h"
 #include "win32/dir.h"
@@ -183,8 +186,8 @@ static struct {
     {	WSAEMFILE,			EMFILE		},
 };
 
-static int
-map_errno(DWORD winerr)
+int
+rb_w32_map_errno(DWORD winerr)
 {
     int i;
 
@@ -204,7 +207,9 @@ map_errno(DWORD winerr)
     return EINVAL;
 }
 
-static char *NTLoginName;
+#define map_errno rb_w32_map_errno
+
+static const char *NTLoginName;
 
 #ifdef WIN95
 static DWORD Win32System = (DWORD)-1;
@@ -367,6 +372,7 @@ static void invalid_parameter(const wchar_t *expr, const wchar_t *func, const wc
 }
 #endif
 
+static CRITICAL_SECTION select_mutex;
 static BOOL fWinsock;
 static char *envarea;
 static void
@@ -380,6 +386,61 @@ exit_handler(void)
 	FreeEnvironmentStrings(envarea);
 	envarea = NULL;
     }
+    DeleteCriticalSection(&select_mutex);
+}
+
+static void
+init_env(void)
+{
+    char env[_MAX_PATH];
+    DWORD len;
+    BOOL f;
+    LPITEMIDLIST pidl;
+
+    if (!GetEnvironmentVariable("HOME", env, sizeof(env))) {
+	f = FALSE;
+	if (GetEnvironmentVariable("HOMEDRIVE", env, sizeof(env)))
+	    len = strlen(env);
+	else
+	    len = 0;
+	if (GetEnvironmentVariable("HOMEPATH", env + len, sizeof(env) - len) || len) {
+	    f = TRUE;
+	}
+	else if (GetEnvironmentVariable("USERPROFILE", env, sizeof(env))) {
+	    f = TRUE;
+	}
+	else if (SHGetSpecialFolderLocation(NULL, CSIDL_PERSONAL, &pidl) == 0) {
+	    LPMALLOC alloc;
+	    f = SHGetPathFromIDList(pidl, env);
+	    SHGetMalloc(&alloc);
+	    alloc->lpVtbl->Free(alloc, pidl);
+	    alloc->lpVtbl->Release(alloc);
+	}
+	if (f) {
+	    char *p = env;
+	    while (*p) {
+		if (*p == '\\') *p = '/';
+		p = CharNext(p);
+	    }
+	    if (p - env == 2 && env[1] == ':') {
+		*p++ = '/';
+		*p = 0;
+	    }
+	    SetEnvironmentVariable("HOME", env);
+	}
+    }
+
+    if (!GetEnvironmentVariable("USER", env, sizeof env)) {
+	if (GetEnvironmentVariable("USERNAME", env, sizeof env) ||
+	    GetUserName(env, (len = sizeof env, &len))) {
+	    SetEnvironmentVariable("USER", env);
+	}
+	else {
+	    NTLoginName = "<Unknown>";
+	    return;
+	}
+    }
+    NTLoginName = strdup(env);
 }
 
 //
@@ -388,10 +449,6 @@ exit_handler(void)
 void
 NtInitialize(int *argc, char ***argv)
 {
-
-    WORD version;
-    int ret;
-
 #if _MSC_VER >= 1400
     static void set_pioinfo_extra(void);
 
@@ -410,7 +467,11 @@ NtInitialize(int *argc, char ***argv)
 
     tzset();
 
+    init_env();
+
     init_stdhandle();
+
+    InitializeCriticalSection(&select_mutex);
 
     atexit(exit_handler);
 
@@ -426,22 +487,7 @@ NtInitialize(int *argc, char ***argv)
 char *
 getlogin()
 {
-    char buffer[200];
-    DWORD len = 200;
-    extern char *NTLoginName;
-
-    if (NTLoginName == NULL) {
-	if (GetUserName(buffer, &len)) {
-	    NTLoginName = (char *)malloc(len+1);
-	    if (!NTLoginName) return NULL;
-	    strncpy(NTLoginName, buffer, len);
-	    NTLoginName[len] = '\0';
-	}
-	else {
-	    NTLoginName = "<Unknown>";
-	}
-    }
-    return NTLoginName;
+    return (char *)NTLoginName;
 }
 
 #define MAXCHILDNUM 256	/* max num of child processes */
@@ -455,15 +501,6 @@ static struct ChildRecord {
     struct ChildRecord* v; \
     for (v = ChildRecord; v < ChildRecord + sizeof(ChildRecord) / sizeof(ChildRecord[0]); ++v)
 #define END_FOREACH_CHILD } while (0)
-
-static struct ChildRecord *
-FindFirstChildSlot(void)
-{
-    FOREACH_CHILD(child) {
-	if (child->pid) return child;
-    } END_FOREACH_CHILD;
-    return NULL;
-}
 
 static struct ChildRecord *
 FindChildSlot(rb_pid_t pid)
@@ -506,7 +543,7 @@ FindFreeChildSlot(void)
    -e 'END{$cmds.sort.each{|n,f|puts "    \"\\#{f.to_s(8)}\" #{n.dump} + 1,"}}'
    98cmd ntcmd
  */
-static char *szInternalCmds[] = {
+static const char *const szInternalCmds[] = {
     "\2" "assoc" + 1,
     "\3" "break" + 1,
     "\3" "call" + 1,
@@ -565,16 +602,22 @@ internal_match(const void *key, const void *elem)
 }
 
 static int
-isInternalCmd(const char *cmd, const char *interp)
+is_command_com(const char *interp)
 {
-    int i, nt = 1;
-    char cmdname[9], *b = cmdname, c, **nm;
+    int i = strlen(interp) - 11;
 
-    i = strlen(interp) - 11;
     if ((i == 0 || i > 0 && isdirsep(interp[i-1])) &&
 	strcasecmp(interp+i, "command.com") == 0) {
-	nt = 0;
+	return 1;
     }
+    return 0;
+}
+
+static int
+is_internal_cmd(const char *cmd, int nt)
+{
+    char cmdname[9], *b = cmdname, c, **nm;
+
     do {
 	if (!(c = *cmd++)) return 0;
     } while (isspace(c));
@@ -610,7 +653,7 @@ rb_w32_get_osfhandle(int fh)
 }
 
 rb_pid_t
-pipe_exec(char *cmd, int mode, FILE **fpr, FILE **fpw)
+pipe_exec(const char *cmd, int mode, FILE **fpr, FILE **fpw)
 {
     struct ChildRecord* child;
     HANDLE hReadIn, hReadOut;
@@ -749,7 +792,7 @@ pipe_exec(char *cmd, int mode, FILE **fpr, FILE **fpw)
 extern VALUE rb_last_status;
 
 int
-do_spawn(int mode, char *cmd)
+do_spawn(int mode, const char *cmd)
 {
     struct ChildRecord *child;
     DWORD exitcode;
@@ -786,7 +829,7 @@ do_spawn(int mode, char *cmd)
 }
 
 int
-do_aspawn(int mode, char *prog, char **argv)
+do_aspawn(int mode, const char *prog, char **argv)
 {
     char *cmd, *p, *q, *s, **t;
     int len, n, bs, quote;
@@ -942,6 +985,7 @@ CreateChild(const char *cmd, const char *prog, SECURITY_ATTRIBUTES *psa,
     else {
 	int redir = -1;
 	int len = 0;
+	int nt;
 	while (ISSPACE(*cmd)) cmd++;
 	for (prog = cmd; *prog; prog = CharNext(prog)) {
 	    if (ISSPACE(*prog)) {
@@ -960,10 +1004,12 @@ CreateChild(const char *cmd, const char *prog, SECURITY_ATTRIBUTES *psa,
 	    cmd = tmp;
 	}
 	else if ((shell = getenv("COMSPEC")) &&
-		 ((redir < 0 ? has_redirection(cmd) : redir) ||
-		  isInternalCmd(cmd, shell))) {
-	    char *tmp = ALLOCA_N(char, strlen(shell) + len + sizeof(" /c "));
-	    sprintf(tmp, "%s /c %.*s", shell, len, cmd);
+		 (nt = !is_command_com(shell),
+		  (redir < 0 ? has_redirection(cmd) : redir) ||
+		  is_internal_cmd(cmd, nt))) {
+	    char *tmp = ALLOCA_N(char, strlen(shell) + len + sizeof(" /c ")
+				 + (nt ? 2 : 0));
+	    sprintf(tmp, nt ? "%s /c \"%.*s\"" : "%s /c %.*s", shell, len, cmd);
 	    cmd = tmp;
 	}
 	else {
@@ -1054,10 +1100,9 @@ insert(const char *path, VALUE vinfo)
     if (!tmpcurr) return -1;
     MEMZERO(tmpcurr, NtCmdLineElement, 1);
     tmpcurr->len = strlen(path);
-    tmpcurr->str = (char *)malloc(tmpcurr->len + 1);
+    tmpcurr->str = strdup(path);
     if (!tmpcurr->str) return -1;
     tmpcurr->flags |= NTMALLOC;
-    strcpy(tmpcurr->str, path);
     **tail = tmpcurr;
     *tail = &tmpcurr->next;
 
@@ -1154,7 +1199,7 @@ skipspace(char *ptr)
 int 
 rb_w32_cmdvector(const char *cmd, char ***vec)
 {
-    int cmdlen, globbing, len, i;
+    int globbing, len;
     int elements, strsz, done;
     int slashes, escape;
     char *ptr, *base, *buffer, *cmdline;
@@ -1240,10 +1285,13 @@ rb_w32_cmdvector(const char *cmd, char ***vec)
 		if (!(slashes & 1)) {
 		    if (!quote)
 			quote = *ptr;
-		    else if (quote == *ptr)
+		    else if (quote == *ptr) {
+			if (quote == '"' && quote == ptr[1])
+			    ptr++;
 			quote = '\0';
-		    escape++;
+		    }
 		}
+		escape++;
 		slashes = 0;
 		break;
 
@@ -1270,10 +1318,10 @@ rb_w32_cmdvector(const char *cmd, char ***vec)
 	//
 
 	if (escape) {
-	    char *p = base;
+	    char *p = base, c;
 	    slashes = quote = 0;
 	    while (p < base + len) {
-		switch (*p) {
+		switch (c = *p) {
 		  case '\\':
 		    p++;
 		    if (quote != '\'') slashes++;
@@ -1281,33 +1329,27 @@ rb_w32_cmdvector(const char *cmd, char ***vec)
 
 		  case '\'':
 		  case '"':
-		    if (!(slashes & 1)) {
-			if (!quote)
-			    quote = *p;
-			else if (quote == *p)
-			    quote = '\0';
-			else {
-			    p++;
-			    slashes = 0;
-			    break;
-			}
-		    }
-		    if (base + slashes == p) {
-			base += slashes >> 1;
-			len -= slashes >> 1;
-			slashes &= 1;
-		    }
-		    if (base == p) {
-			base = ++p;
-			--len;
-		    }
-		    else {
-			memcpy(p - ((slashes + 1) >> 1), p + (~slashes & 1), base + len - p);
-			slashes >>= 1;
-			p -= slashes;
-			len -= slashes + 1;
+		    if (!(slashes & 1) && quote && quote != c) {
+			p++;
 			slashes = 0;
+			break;
 		    }
+		    memcpy(p - ((slashes + 1) >> 1), p + (~slashes & 1),
+			   base + len - p);
+		    len -= ((slashes + 1) >> 1) + (~slashes & 1);
+		    p -= (slashes + 1) >> 1;
+		    if (!(slashes & 1)) {
+			if (quote) {
+			    if (quote == '"' && quote == *p)
+				p++;
+			    quote = '\0';
+			}
+			else
+			    quote = c;
+		    }
+		    else
+			p++;
+		    slashes = 0;
 		    break;
 
 		  default:
@@ -1374,10 +1416,10 @@ rb_w32_cmdvector(const char *cmd, char ***vec)
     ptr = buffer + (elements+1) * sizeof(char *);
 
     while (curr = cmdhead) {
-	strncpy (ptr, curr->str, curr->len);
-	ptr[curr->len] = '\0';
+	memcpy(ptr, curr->str, curr->len);
 	*vptr++ = ptr;
-	ptr += curr->len + 1;
+	ptr += curr->len;
+	*ptr++ = '\0';
 	cmdhead = curr->next;
 	if (curr->flags & NTMALLOC) free(curr->str);
 	free(curr);
@@ -1860,7 +1902,7 @@ rb_w32_strerror(int e)
 	    e = GetLastError();
 	if (FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM |
 			  FORMAT_MESSAGE_IGNORE_INSERTS, &source, e, 0,
-			  buffer, 512, NULL) == 0) {
+			  buffer, sizeof(buffer), NULL) == 0) {
 	    strcpy(buffer, "Unknown Error");
 	}
     }
@@ -2007,87 +2049,250 @@ rb_w32_fdisset(int fd, fd_set *set)
 static int NtSocketsInitialized = 0;
 
 static int
-extract_file_fd(fd_set *set, fd_set *fileset)
+extract_fd(fd_set *dst, fd_set *src, int (*func)(SOCKET))
 {
-    int idx;
+    int s = 0;
+    if (!src || !dst) return 0;
 
-    fileset->fd_count = 0;
-    if (!set)
-	return 0;
-    for (idx = 0; idx < set->fd_count; idx++) {
-	SOCKET fd = set->fd_array[idx];
+    while (s < src->fd_count) {
+        SOCKET fd = src->fd_array[s];
 
-	if (!is_socket(fd)) {
-	    int i;
+	if (!func || (*func)(fd)) { /* move it to dst */
+	    int d;
 
-	    for (i = 0; i < fileset->fd_count; i++) {
-		if (fileset->fd_array[i] == fd) {
-		    break;
-		}
+	    for (d = 0; d < dst->fd_count; d++) {
+		if (dst->fd_array[d] == fd) break;
 	    }
-	    if (i == fileset->fd_count) {
-		if (fileset->fd_count < FD_SETSIZE) {
-		    fileset->fd_array[i] = fd;
-		    fileset->fd_count++;
-		}
+	    if (d == dst->fd_count && dst->fd_count < FD_SETSIZE) {
+		dst->fd_array[dst->fd_count++] = fd;
 	    }
+	    memmove(
+		&src->fd_array[s],
+		&src->fd_array[s+1], 
+		sizeof(src->fd_array[0]) * (--src->fd_count - s));
 	}
+	else s++;
     }
-    return fileset->fd_count;
+
+    return dst->fd_count;
 }
 
+static int
+is_not_socket(SOCKET sock)
+{
+    return !is_socket(sock);
+}
+
+static int
+is_pipe(SOCKET sock) /* DONT call this for SOCKET! it clains it is PIPE. */
+{
+    int ret;
+
+    RUBY_CRITICAL(
+	ret = (GetFileType((HANDLE)sock) == FILE_TYPE_PIPE)
+    );
+
+    return ret;
+}
+
+static int
+is_readable_pipe(SOCKET sock) /* call this for pipe only */
+{
+    int ret;
+    DWORD n = 0;
+
+    RUBY_CRITICAL(
+	if (PeekNamedPipe((HANDLE)sock, NULL, 0, NULL, &n, NULL)) {
+	    ret = (n > 0);
+	}
+	else {
+	    ret = (GetLastError() == ERROR_BROKEN_PIPE); /* pipe was closed */
+	}
+    );
+
+    return ret;
+}
+
+static int
+is_console(SOCKET sock) /* DONT call this for SOCKET! */
+{
+    int ret;
+    DWORD n = 0;
+    INPUT_RECORD ir;
+
+    RUBY_CRITICAL(
+	ret = (PeekConsoleInput((HANDLE)sock, &ir, 1, &n))
+    );
+
+    return ret;
+}
+
+static int
+is_readable_console(SOCKET sock) /* call this for console only */
+{
+    int ret = 0;
+    DWORD n = 0;
+    INPUT_RECORD ir;
+
+    RUBY_CRITICAL(
+	if (PeekConsoleInput((HANDLE)sock, &ir, 1, &n) && n > 0) {
+	    if (ir.EventType == KEY_EVENT && ir.Event.KeyEvent.bKeyDown &&
+		ir.Event.KeyEvent.uChar.AsciiChar) {
+		ret = 1;
+	    }
+	    else {
+		ReadConsoleInput((HANDLE)sock, &ir, 1, &n);
+	    }
+	}
+    );
+
+    return ret;
+}
+
+static int
+do_select(int nfds, fd_set *rd, fd_set *wr, fd_set *ex,
+            struct timeval *timeout)
+{
+    int r = 0;
+
+    if (nfds == 0) {
+	if (timeout)
+	    rb_w32_sleep(timeout->tv_sec * 1000 + timeout->tv_usec / 1000);
+	else
+	    rb_w32_sleep(INFINITE);
+    }
+    else {
+	RUBY_CRITICAL(
+	    EnterCriticalSection(&select_mutex);
+	    r = select(nfds, rd, wr, ex, timeout);
+	    LeaveCriticalSection(&select_mutex);
+	    if (r == SOCKET_ERROR) {
+		errno = map_errno(WSAGetLastError());
+		r = -1;
+	    }
+	);
+    }
+
+    return r;
+}
+
+static inline int
+subst(struct timeval *rest, const struct timeval *wait)
+{
+    while (rest->tv_usec < wait->tv_usec) {
+	if (rest->tv_sec <= wait->tv_sec) {
+	    return 0;
+	}
+	rest->tv_sec -= 1;
+	rest->tv_usec += 1000 * 1000;
+    }
+    rest->tv_sec -= wait->tv_sec;
+    rest->tv_usec -= wait->tv_usec;
+    return 1;
+}
+
+static inline int
+compare(const struct timeval *t1, const struct timeval *t2)
+{
+    if (t1->tv_sec < t2->tv_sec)
+	return -1;
+    if (t1->tv_sec > t2->tv_sec)
+	return 1;
+    if (t1->tv_usec < t2->tv_usec)
+	return -1;
+    if (t1->tv_usec > t2->tv_usec)
+	return 1;
+    return 0;
+}
+
+#undef Sleep
 long 
 rb_w32_select (int nfds, fd_set *rd, fd_set *wr, fd_set *ex,
 	       struct timeval *timeout)
 {
     long r;
-    fd_set file_rd;
-    fd_set file_wr;
-#ifdef USE_INTERRUPT_WINSOCK
-    fd_set trap;
-#endif /* USE_INTERRUPT_WINSOCK */
-    int file_nfds;
+    fd_set pipe_rd;
+    fd_set cons_rd;
+    fd_set else_rd;
+    fd_set else_wr;
+    int nonsock = 0;
 
+    if (nfds < 0 || (timeout && (timeout->tv_sec < 0 || timeout->tv_usec < 0))) {
+	errno = EINVAL;
+	return -1;
+    }
     if (!NtSocketsInitialized) {
 	StartSockets();
     }
+
+    // assume else_{rd,wr} (other than socket, pipe reader, console reader)
+    // are always readable/writable. but this implementation still has
+    // problem. if pipe's buffer is full, writing to pipe will block
+    // until some data is read from pipe. but ruby is single threaded system,
+    // so whole system will be blocked forever.
+
+    else_rd.fd_count = 0;
+    nonsock += extract_fd(&else_rd, rd, is_not_socket);
+
+    pipe_rd.fd_count = 0;
+    extract_fd(&pipe_rd, &else_rd, is_pipe); // should not call is_pipe for socket
+
+    cons_rd.fd_count = 0;
+    extract_fd(&cons_rd, &else_rd, is_console); // ditto
+
+    else_wr.fd_count = 0;
+    nonsock += extract_fd(&else_wr, wr, is_not_socket);
+
     r = 0;
     if (rd && rd->fd_count > r) r = rd->fd_count;
     if (wr && wr->fd_count > r) r = wr->fd_count;
     if (ex && ex->fd_count > r) r = ex->fd_count;
     if (nfds > r) nfds = r;
-    if (nfds == 0 && timeout) {
-	Sleep(timeout->tv_sec * 1000 + timeout->tv_usec / 1000);
-	return 0;
-    }
-    file_nfds = extract_file_fd(rd, &file_rd);
-    file_nfds += extract_file_fd(wr, &file_wr);
-    if (file_nfds)
+
     {
-	// assume normal files are always readable/writable
-	// fake read/write fd_set and return value
-	if (rd) *rd = file_rd;
-	if (wr) *wr = file_wr;
-	return file_nfds;
+	struct timeval rest;
+	struct timeval wait;
+	struct timeval zero;
+	if (timeout) rest = *timeout;
+	wait.tv_sec = 0; wait.tv_usec = 10 * 1000; // 10ms
+	zero.tv_sec = 0; zero.tv_usec = 0;         //  0ms
+	do {
+	    if (nonsock) {
+		// modifying {else,pipe,cons}_rd is safe because
+		// if they are modified, function returns immediately.
+		extract_fd(&else_rd, &pipe_rd, is_readable_pipe);
+		extract_fd(&else_rd, &cons_rd, is_readable_console);
+	    }
+
+	    if (else_rd.fd_count || else_wr.fd_count) {
+		r = do_select(nfds, rd, wr, ex, &zero); // polling
+		if (r < 0) break; // XXX: should I ignore error and return signaled handles?
+		r += extract_fd(rd, &else_rd, NULL); // move all
+		r += extract_fd(wr, &else_wr, NULL); // move all
+		break;
+	    }
+	    else {
+		struct timeval *dowait =
+		    compare(&rest, &wait) < 0 ? &rest : &wait;
+
+		fd_set orig_rd;
+		fd_set orig_wr;
+		fd_set orig_ex;
+		if (rd) orig_rd = *rd;
+		if (wr) orig_wr = *wr;
+		if (ex) orig_ex = *ex;
+		r = do_select(nfds, rd, wr, ex, &zero);	// polling
+		if (r != 0) break; // signaled or error
+		if (rd) *rd = orig_rd;
+		if (wr) *wr = orig_wr;
+		if (ex) *ex = orig_ex;
+
+		// XXX: should check the time select spent
+		Sleep(dowait->tv_sec * 1000 + dowait->tv_usec / 1000);
+	    }
+	} while (!timeout || subst(&rest, &wait));
     }
 
-#if USE_INTERRUPT_WINSOCK
-    if (ex)
-	trap = *ex;
-    else
-	trap.fd_count = 0;
-    if (trap.fd_count < FD_SETSIZE)
-	trap.fd_array[trap.fd_count++] = (SOCKET)interrupted_event;
-    // else unable to catch interrupt.
-    ex = &trap;
-#endif /* USE_INTERRUPT_WINSOCK */
-
-    RUBY_CRITICAL({
-	r = select(nfds, rd, wr, ex, timeout);
-	if (r == SOCKET_ERROR) {
-	    errno = map_errno(WSAGetLastError());
-	}
-    });
     return r;
 }
 
@@ -3222,7 +3427,6 @@ rb_w32_times(struct tms *tmbuf)
     return 0;
 }
 
-#undef Sleep
 #define yield_once() Sleep(0)
 #define yield_until(condition) do yield_once(); while (!(condition))
 
@@ -3720,9 +3924,7 @@ int
 rb_w32_utime(const char *path, struct utimbuf *times)
 {
     HANDLE hFile;
-    SYSTEMTIME st;
     FILETIME atime, mtime;
-    struct tm *tm;
     struct stat stat;
     int ret = 0;
 

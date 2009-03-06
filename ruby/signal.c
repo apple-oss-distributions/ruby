@@ -3,7 +3,7 @@
   signal.c -
 
   $Author: knu $
-  $Date: 2007-03-11 17:31:53 +0900 (Sun, 11 Mar 2007) $
+  $Date: 2008-06-06 19:39:57 +0900 (Fri, 06 Jun 2008) $
   created at: Tue Dec 20 10:13:44 JST 1994
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -21,6 +21,12 @@
 #undef SIGBUS
 #endif
 
+#if defined HAVE_SIGPROCMASK || defined HAVE_SIGSETMASK
+#define USE_TRAP_MASK 1
+#else
+#define USE_TRAP_MASK 0
+#endif
+
 #ifndef NSIG
 # ifdef DJGPP
 #  define NSIG SIGMAX
@@ -30,7 +36,7 @@
 #endif
 
 static struct signals {
-    char *signm;
+    const char *signm;
     int  signo;
 } siglist [] = {
     {"EXIT", 0},
@@ -180,7 +186,7 @@ signm2signo(nm)
     return 0;
 }
 
-static char*
+static const char*
 signo2signm(no)
     int no;
 {
@@ -264,14 +270,17 @@ esignal_init(argc, argv, self)
 }
 
 static VALUE
-interrupt_init(self, mesg)
-    VALUE self, mesg;
+interrupt_init(argc, argv, self)
+    int argc;
+    VALUE *argv;
+    VALUE self;
 {
-    VALUE argv[2];
+    VALUE args[2];
 
-    argv[0] = INT2FIX(SIGINT);
-    argv[1] = mesg;
-    return rb_call_super(2, argv);
+    args[0] = INT2FIX(SIGINT);
+    rb_scan_args(argc, argv, "01", &args[1]);
+
+    return rb_call_super(2, args);
 }
 
 void
@@ -318,7 +327,7 @@ rb_f_kill(argc, argv)
     int negative = 0;
     int sig;
     int i;
-    char *s;
+    const char *s;
 
     rb_secure(2);
     if (argc < 2)
@@ -563,16 +572,17 @@ sighandler(sig)
 
 #if defined(HAVE_NATIVETHREAD) && defined(HAVE_NATIVETHREAD_KILL)
     if (!is_ruby_native_thread() && !rb_trap_accept_nativethreads[sig]) {
-        sigsend_to_ruby_thread(sig);
-        return;
+	sigsend_to_ruby_thread(sig);
+	return;
     }
 #endif
 
 #if !defined(BSD_SIGNAL) && !defined(POSIX_SIGNAL)
     if (rb_trap_accept_nativethreads[sig]) {
-        ruby_nativethread_signal(sig, sighandler);
-    } else {
-        ruby_signal(sig, sighandler);
+	ruby_nativethread_signal(sig, sighandler);
+    }
+    else {
+	ruby_signal(sig, sighandler);
     }
 #endif
 
@@ -619,6 +629,8 @@ sigsegv(sig)
     }
 #endif
 
+    extern int ruby_gc_stress;
+    ruby_gc_stress = 0;
     rb_bug("Segmentation fault");
 }
 #endif
@@ -663,7 +675,7 @@ rb_trap_exec()
 }
 
 struct trap_arg {
-#ifndef _WIN32
+#if USE_TRAP_MASK
 # ifdef HAVE_SIGPROCMASK
     sigset_t mask;
 # else
@@ -673,11 +685,13 @@ struct trap_arg {
     VALUE sig, cmd;
 };
 
+#if USE_TRAP_MASK
 # ifdef HAVE_SIGPROCMASK
 static sigset_t trap_last_mask;
 # else
 static int trap_last_mask;
 # endif
+#endif
 
 static RETSIGTYPE sigexit _((int));
 static RETSIGTYPE
@@ -694,7 +708,7 @@ trap(arg)
     sighandler_t func, oldfunc;
     VALUE command, oldcmd;
     int sig = -1;
-    char *s;
+    const char *s;
 
     func = sighandler;
     command = arg->cmd;
@@ -812,7 +826,7 @@ trap(arg)
     trap_list[sig].cmd = command;
     trap_list[sig].safe = ruby_safe_level;
     /* enable at least specified signal. */
-#ifndef _WIN32
+#if USE_TRAP_MASK
 #ifdef HAVE_SIGPROCMASK
     sigdelset(&arg->mask, sig);
 #else
@@ -822,7 +836,7 @@ trap(arg)
     return oldcmd;
 }
 
-#ifndef _WIN32
+#if USE_TRAP_MASK
 static VALUE
 trap_ensure(arg)
     struct trap_arg *arg;
@@ -841,7 +855,7 @@ trap_ensure(arg)
 void
 rb_trap_restore_mask()
 {
-#ifndef _WIN32
+#if USE_TRAP_MASK
 # ifdef HAVE_SIGPROCMASK
     sigprocmask(SIG_SETMASK, &trap_last_mask, NULL);
 # else
@@ -901,7 +915,7 @@ sig_trap(argc, argv)
     if (OBJ_TAINTED(arg.cmd)) {
 	rb_raise(rb_eSecurityError, "Insecure: tainted signal trap");
     }
-#ifndef _WIN32
+#if USE_TRAP_MASK
     /* disable interrupt */
 # ifdef HAVE_SIGPROCMASK
     sigfillset(&arg.mask);
@@ -979,12 +993,13 @@ install_nativethread_sighandler(signum, handler)
 #endif
 #endif
 
+#if defined(SIGCLD) || defined(SIGCHLD)
 static void
 init_sigchld(sig)
     int sig;
 {
     sighandler_t oldfunc;
-#ifndef _WIN32
+#if USE_TRAP_MASK
 # ifdef HAVE_SIGPROCMASK
     sigset_t mask;
 # else
@@ -992,7 +1007,7 @@ init_sigchld(sig)
 # endif
 #endif
 
-#ifndef _WIN32
+#if USE_TRAP_MASK
     /* disable interrupt */
 # ifdef HAVE_SIGPROCMASK
     sigfillset(&mask);
@@ -1009,7 +1024,7 @@ init_sigchld(sig)
 	trap_list[sig].cmd = 0;
     }
 
-#ifndef _WIN32
+#if USE_TRAP_MASK
 #ifdef HAVE_SIGPROCMASK
     sigdelset(&mask, sig);
     sigprocmask(SIG_SETMASK, &mask, NULL);
@@ -1020,6 +1035,7 @@ init_sigchld(sig)
     trap_last_mask = mask;
 #endif
 }
+#endif
 
 /*
  * Many operating systems allow signals to be sent to running
@@ -1071,7 +1087,7 @@ Init_signal()
     rb_define_method(rb_eSignal, "initialize", esignal_init, -1);
     rb_attr(rb_eSignal, rb_intern("signo"), 1, 0, 0);
     rb_alias(rb_eSignal, rb_intern("signm"), rb_intern("message"));
-    rb_define_method(rb_eInterrupt, "initialize", interrupt_init, 1);
+    rb_define_method(rb_eInterrupt, "initialize", interrupt_init, -1);
 
     install_sighandler(SIGINT, sighandler);
 #ifdef SIGHUP

@@ -2,8 +2,8 @@
 
   time.c -
 
-  $Author: knu $
-  $Date: 2007-03-06 19:12:12 +0900 (Tue, 06 Mar 2007) $
+  $Author: shyouhei $
+  $Date: 2008-06-29 20:09:30 +0900 (Sun, 29 Jun 2008) $
   created at: Tue Dec 28 14:31:59 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -13,6 +13,7 @@
 #include "ruby.h"
 #include <sys/types.h>
 #include <time.h>
+#include <errno.h>
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -170,7 +171,7 @@ time_timeval(time, interval)
     int interval;
 {
     struct timeval t;
-    char *tstr = interval ? "time interval" : "time";
+    const char *tstr = interval ? "time interval" : "time";
 
 #ifndef NEGATIVE_TIME_T
     interval = 1;
@@ -191,6 +192,10 @@ time_timeval(time, interval)
 	    double f, d;
 
 	    d = modf(RFLOAT(time)->value, &f);
+            if (d < 0) {
+                d += 1;
+                f -= 1;
+            }
 	    t.tv_sec = (time_t)f;
 	    if (f != t.tv_sec) {
 		rb_raise(rb_eRangeError, "%f out of Time range", RFLOAT(time)->value);
@@ -278,7 +283,7 @@ time_s_at(argc, argv, klass)
     return t;
 }
 
-static char *months [12] = {
+static const char months[][4] = {
     "jan", "feb", "mar", "apr", "may", "jun",
     "jul", "aug", "sep", "oct", "nov", "dec",
 };
@@ -349,7 +354,7 @@ time_arg(argc, argv, tm, usec)
 	    tm->tm_mon = -1;
 	    for (i=0; i<12; i++) {
 		if (RSTRING(s)->len == 3 &&
-		    strcasecmp(months[i], RSTRING(v[1])->ptr) == 0) {
+		    strcasecmp(months[i], RSTRING(s)->ptr) == 0) {
 		    tm->tm_mon = i;
 		    break;
 		}
@@ -758,7 +763,10 @@ make_time_t(tptr, utc_p)
     int utc_p;
 {
     time_t t;
-    struct tm *tmp, buf;
+#ifdef NEGATIVE_TIME_T
+    struct tm *tmp;
+#endif
+    struct tm buf;
     buf = *tptr;
     if (utc_p) {
 #if defined(HAVE_TIMEGM)
@@ -1397,9 +1405,14 @@ time_succ(time)
     VALUE time;
 {
     struct time_object *tobj;
+    int gmt;
 
     GetTimeval(time, tobj);
-    return rb_time_new(tobj->tv.tv_sec + 1, tobj->tv.tv_usec);
+    gmt = tobj->gmt;
+    time = rb_time_new(tobj->tv.tv_sec + 1, tobj->tv.tv_usec);
+    GetTimeval(time, tobj);
+    tobj->gmt = gmt;
+    return time;
 }
 
 /*
@@ -1771,8 +1784,9 @@ rb_strftime(buf, format, time)
     if (flen == 0) {
 	return 0;
     }
+    errno = 0;
     len = strftime(*buf, SMALLBUF, format, time);
-    if (len != 0 || **buf == '\0') return len;
+    if (len != 0 || (**buf == '\0' && errno != ERANGE)) return len;
     for (size=1024; ; size*=2) {
 	*buf = xmalloc(size);
 	(*buf)[0] = '\0';

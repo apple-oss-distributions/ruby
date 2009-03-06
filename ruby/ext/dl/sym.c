@@ -1,5 +1,5 @@
 /* -*- C -*-
- * $Id: sym.c 12039 2007-03-11 16:24:34Z knu $
+ * $Id: sym.c 18479 2008-08-11 00:37:21Z shyouhei $
  */
 
 #include <ruby.h>
@@ -268,7 +268,7 @@ rb_dlsym_inspect(VALUE self)
   str_size = RSTRING(proto)->len + 100;
   str = dlmalloc(str_size);
   snprintf(str, str_size - 1,
-          "#<DL::Symbol:0x%x func=0x%x '%s'>",
+          "#<DL::Symbol:0x%lx func=0x%lx '%s'>",
 	   sym, sym->func, RSTRING(proto)->ptr);
   val = rb_tainted_str_new2(str);
   dlfree(str);
@@ -492,6 +492,7 @@ rb_dlsym_call(int argc, VALUE argv[], VALUE self)
 	      rb_raise(rb_eDLTypeError, "unexpected type of argument #%d", i);
 	    }
 	  }
+	  rb_check_safe_obj(pval);
 	  Data_Get_Struct(pval, struct ptr_data, data);
 	  ANY2P(args[i]) = DLVOIDP(data->ptr);
 	}

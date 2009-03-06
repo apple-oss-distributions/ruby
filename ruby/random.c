@@ -2,8 +2,8 @@
 
   random.c -
 
-  $Author: shyouhei $
-  $Date: 2007-02-13 08:01:19 +0900 (Tue, 13 Feb 2007) $
+  $Author: knu $
+  $Date: 2008-04-14 19:52:17 +0900 (Mon, 14 Apr 2008) $
   created at: Fri Dec 24 16:39:21 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -12,7 +12,7 @@
 
 /* 
 This is based on trimmed version of MT19937.  To get the original version,
-contact <http://www.math.keio.ac.jp/~matumoto/emt.html>.
+contact <http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/emt.html>.
 
 The original copyright notice follows.
 
@@ -146,8 +146,8 @@ next_state()
 }
 
 /* generates a random number on [0,0xffffffff]-interval */
-static unsigned long
-genrand_int32(void)
+unsigned long
+rb_genrand_int32(void)
 {
     unsigned long y;
 
@@ -164,10 +164,10 @@ genrand_int32(void)
 }
 
 /* generates a random number on [0,1) with 53-bit resolution*/
-static double
-genrand_real(void) 
+double
+rb_genrand_real(void) 
 { 
-    unsigned long a=genrand_int32()>>5, b=genrand_int32()>>6; 
+    unsigned long a=rb_genrand_int32()>>5, b=rb_genrand_int32()>>6; 
     return(a*67108864.0+b)*(1.0/9007199254740992.0); 
 } 
 /* These real versions are due to Isaku Wada, 2002/01/09 added */
@@ -310,8 +310,8 @@ random_seed()
  *     srand(number=0)    => old_seed
  *  
  *  Seeds the pseudorandom number generator to the value of
- *  <i>number</i>.<code>to_i.abs</code>. If <i>number</i> is omitted
- *  or zero, seeds the generator using a combination of the time, the
+ *  <i>number</i>.<code>to_i.abs</code>. If <i>number</i> is omitted,
+ *  seeds the generator using a combination of the time, the
  *  process id, and a sequence number. (This is also the behavior if
  *  <code>Kernel::rand</code> is called without previously calling
  *  <code>srand</code>, but without the sequence.) By setting the seed
@@ -361,7 +361,7 @@ limited_rand(unsigned long limit)
     val = 0;
     for (i = SIZEOF_LONG/4-1; 0 <= i; i--) {
         if (mask >> (i * 32)) {
-            val |= genrand_int32() << (i * 32);
+            val |= rb_genrand_int32() << (i * 32);
             val &= mask;
             if (limit < val)
                 goto retry;
@@ -399,7 +399,7 @@ limited_big_rand(struct RBignum *limit)
         lim = BIG_GET32(limit, i);
         mask = mask ? 0xffffffff : make_mask(lim);
         if (mask) {
-            rnd = genrand_int32() & mask;
+            rnd = rb_genrand_int32() & mask;
             if (boundary) {
                 if (lim < rnd)
                     goto retry;
@@ -470,7 +470,7 @@ rb_f_rand(argc, argv, obj)
             limit = (struct RBignum *)rb_big_minus((VALUE)limit, INT2FIX(1));
             if (FIXNUM_P((VALUE)limit)) {
                 if (FIX2LONG((VALUE)limit) == -1)
-                    return rb_float_new(genrand_real());
+                    return rb_float_new(rb_genrand_real());
                 return LONG2NUM(limited_rand(FIX2LONG((VALUE)limit)));
             }
             return limited_big_rand(limit);
@@ -481,13 +481,14 @@ rb_f_rand(argc, argv, obj)
       default:
 	vmax = rb_Integer(vmax);
 	if (TYPE(vmax) == T_BIGNUM) goto bignum;
+	/* fall through */
       case T_FIXNUM:
 	max = FIX2LONG(vmax);
 	break;
     }
 
     if (max == 0) {
-	return rb_float_new(genrand_real());
+	return rb_float_new(rb_genrand_real());
     }
     if (max < 0) max = -max;
     val = limited_rand(max-1);

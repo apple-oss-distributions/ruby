@@ -2,8 +2,8 @@
 
   dln.c -
 
-  $Author: shyouhei $
-  $Date: 2007-02-13 08:01:19 +0900 (Tue, 13 Feb 2007) $
+  $Author: knu $
+  $Date: 2008-06-06 19:39:57 +0900 (Fri, 06 Jun 2008) $
   created at: Tue Jan 18 17:05:06 JST 1994
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -81,19 +81,28 @@ char *getenv();
 # include "macruby_private.h"
 #endif
 
+#if defined(__APPLE__) && defined(__MACH__)   /* Mac OS X */
+# if defined(HAVE_DLOPEN)
+   /* Mac OS X with dlopen (10.3 or later) */
+#  define MACOSX_DLOPEN
+# else
+#  define MACOSX_DYLD
+# endif
+#endif
+
 #ifdef __BEOS__
 # include <image.h>
 #endif
 
 #ifndef NO_DLN_LOAD
 
-#if defined(HAVE_DLOPEN) && !defined(USE_DLN_A_OUT) && !defined(_AIX) && !defined(_UNICOSMP)
+#if defined(HAVE_DLOPEN) && !defined(USE_DLN_A_OUT) && !defined(_AIX) && !defined(MACOSX_DYLD) && !defined(_UNICOSMP)
 /* dynamic load with dlopen() */
 # define USE_DLN_DLOPEN
 #endif
 
 #ifndef FUNCNAME_PATTERN
-# if defined(__hp9000s300) ||  (defined(__NetBSD__) && !defined(__ELF__)) || defined(__BORLANDC__) || (defined(__FreeBSD__) && !defined(__ELF__)) || (defined(__OpenBSD__) && !defined(__ELF__)) || defined(NeXT) || defined(__WATCOMC__)
+# if defined(__hp9000s300) ||  (defined(__NetBSD__) && !defined(__ELF__)) || defined(__BORLANDC__) || (defined(__FreeBSD__) && !defined(__ELF__)) || (defined(__OpenBSD__) && !defined(__ELF__)) || defined(NeXT) || defined(__WATCOMC__) || defined(MACOSX_DYLD)
 #  define FUNCNAME_PATTERN "_Init_%s"
 # else
 #  define FUNCNAME_PATTERN "Init_%s"
@@ -636,7 +645,7 @@ load_1(fd, disp, need_init)
     long disp;
     const char *need_init;
 {
-    static char *libc = LIBC_NAME;
+    static const char *libc = LIBC_NAME;
     struct exec hdr;
     struct relocation_info *reloc = NULL;
     long block = 0;
@@ -1140,6 +1149,10 @@ dln_sym(name)
 #define NSLINKMODULE_OPTION_BINDNOW 1
 #endif
 #endif
+#else
+#ifdef MACOSX_DYLD
+#include <mach-o/dyld.h>
+#endif
 #endif
 
 #if defined _WIN32 && !defined __CYGWIN__
@@ -1399,7 +1412,7 @@ dln_load(file)
     }
 #endif /* _AIX */
 
-#if defined(NeXT)
+#if defined(NeXT) || defined(MACOSX_DYLD)
 #define DLN_DEFINED
 /*----------------------------------------------------
    By SHIROYAMA Takayuki Psi@fortune.nest.or.jp
@@ -1523,7 +1536,7 @@ dln_load(file)
     }
 #endif /* __BEOS__*/
 
-#ifdef __MACOS__
+#ifdef __MACOS__   /* Mac OS 9 or before */
 # define DLN_DEFINED
     {
       OSErr err;
@@ -1672,64 +1685,35 @@ dln_find_file(fname, path)
 #endif
 }
 
-#if defined(__CYGWIN32__)
-const char *
-conv_to_posix_path(win32, posix, len)
-    char *win32;
-    char *posix;
-    int len;
-{
-    char *first = win32;
-    char *p = win32;
-    char *dst = posix;
-
-    posix[0] = '\0';
-    for (p = win32; *p; p++)
-	if (*p == ';') {
-	    *p = 0;
-	    cygwin32_conv_to_posix_path(first, posix);
-	    posix += strlen(posix);
-	    *posix++ = ':';
-	    first = p + 1;
-	    *p = ';';
-	}
-    if (len < strlen(first))
-	fprintf(stderr, "PATH length too long: %s\n", first);
-    else
-	cygwin32_conv_to_posix_path(first, posix);
-    return dst;
-}
-#endif
-
 static char fbuf[MAXPATHLEN];
 
 static char *
 dln_find_1(fname, path, exe_flag)
-    char *fname;
-    char *path;
+    const char *fname;
+    const char *path;
     int exe_flag;		/* non 0 if looking for executable. */
 {
-    register char *dp;
-    register char *ep;
+    register const char *dp;
+    register const char *ep;
     register char *bp;
     struct stat st;
 #ifdef __MACOS__
     const char* mac_fullpath;
 #endif
 
-    if (!fname) return fname;
-    if (fname[0] == '/') return fname;
+    if (!fname) return (char *)fname;
+    if (fname[0] == '/') return (char *)fname;
     if (strncmp("./", fname, 2) == 0 || strncmp("../", fname, 3) == 0)
-      return fname;
-    if (exe_flag && strchr(fname, '/')) return fname;
+      return (char *)fname;
+    if (exe_flag && strchr(fname, '/')) return (char *)fname;
 #ifdef DOSISH
-    if (fname[0] == '\\') return fname;
+    if (fname[0] == '\\') return (char *)fname;
 # ifdef DOSISH_DRIVE_LETTER
-    if (strlen(fname) > 2 && fname[1] == ':') return fname;
+    if (strlen(fname) > 2 && fname[1] == ':') return (char *)fname;
 # endif
     if (strncmp(".\\", fname, 2) == 0 || strncmp("..\\", fname, 3) == 0)
-      return fname;
-    if (exe_flag && strchr(fname, '\\')) return fname;
+      return (char *)fname;
+    if (exe_flag && strchr(fname, '\\')) return (char *)fname;
 #endif
 
     for (dp = path;; dp = ++ep) {
@@ -1797,6 +1781,45 @@ dln_find_1(fname, path, exe_flag)
 	}
 	memcpy(bp, fname, i + 1);
 
+#if defined(DOSISH)
+	if (exe_flag) {
+	    static const char extension[][5] = {
+#if defined(MSDOS)
+		".com", ".exe", ".bat",
+#if defined(DJGPP)
+		".btm", ".sh", ".ksh", ".pl", ".sed",
+#endif
+#elif defined(__EMX__) || defined(_WIN32)
+		".exe", ".com", ".cmd", ".bat",
+/* end of __EMX__ or _WIN32 */
+#else
+		".r", ".R", ".x", ".X", ".bat", ".BAT",
+/* __human68k__ */
+#endif
+	    };
+	    int j;
+
+	    for (j = 0; j < sizeof(extension) / sizeof(extension[0]); j++) {
+		if (fspace < strlen(extension[j])) {
+		    fprintf(stderr, "openpath: pathname too long (ignored)\n");
+		    fprintf(stderr, "\tDirectory \"%.*s\"\n", (int) (bp - fbuf), fbuf);
+		    fprintf(stderr, "\tFile \"%s%s\"\n", fname, extension[j]);
+		    continue;
+		}
+		strcpy(bp + i, extension[j]);
+#ifndef __MACOS__
+		if (stat(fbuf, &st) == 0)
+		    return fbuf;
+#else
+		if (mac_fullpath = _macruby_exist_file_in_libdir_as_posix_name(fbuf))
+		    return mac_fullpath;
+
+#endif
+	    }
+	    goto next;
+	}
+#endif /* MSDOS or _WIN32 or __human68k__ or __EMX__ */
+
 #ifndef __MACOS__
 	if (stat(fbuf, &st) == 0) {
 	    if (exe_flag == 0) return fbuf;
@@ -1814,44 +1837,6 @@ dln_find_1(fname, path, exe_flag)
 	    }
 	}
 #endif
-#if defined(DOSISH)
-	if (exe_flag) {
-	    static const char *extension[] = {
-#if defined(MSDOS)
-		".com", ".exe", ".bat",
-#if defined(DJGPP)
-		".btm", ".sh", ".ksh", ".pl", ".sed",
-#endif
-#elif defined(__EMX__) || defined(_WIN32)
-		".exe", ".com", ".cmd", ".bat",
-/* end of __EMX__ or _WIN32 */
-#else
-		".r", ".R", ".x", ".X", ".bat", ".BAT",
-/* __human68k__ */
-#endif
-		(char *) NULL
-	    };
-	    int j;
-
-	    for (j = 0; extension[j]; j++) {
-		if (fspace < strlen(extension[j])) {
-		    fprintf(stderr, "openpath: pathname too long (ignored)\n");
-		    fprintf(stderr, "\tDirectory \"%.*s\"\n", (int) (bp - fbuf), fbuf);
-		    fprintf(stderr, "\tFile \"%s%s\"\n", fname, extension[j]);
-		    continue;
-		}
-		strcpy(bp + i, extension[j]);
-#ifndef __MACOS__
-		if (stat(fbuf, &st) == 0)
-		    return fbuf;
-#else
-		if (mac_fullpath = _macruby_exist_file_in_libdir_as_posix_name(fbuf))
-		    return mac_fullpath;
-
-#endif
-	    }
-	}
-#endif /* MSDOS or _WIN32 or __human68k__ or __EMX__ */
 
       next:
 	/* if not, and no other alternatives, life is bleak */

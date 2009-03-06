@@ -2,8 +2,8 @@
 
   struct.c -
 
-  $Author: shyouhei $
-  $Date: 2007-02-13 08:01:19 +0900 (Tue, 13 Feb 2007) $
+  $Author: knu $
+  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
   created at: Tue Mar 22 18:44:30 JST 1995
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -20,7 +20,7 @@ static VALUE struct_alloc _((VALUE));
 VALUE
 rb_struct_iv_get(c, name)
     VALUE c;
-    char *name;
+    const char *name;
 {
     ID id;
 
@@ -41,7 +41,10 @@ rb_struct_s_members(klass)
     VALUE members = rb_struct_iv_get(klass, "__members__");
 
     if (NIL_P(members)) {
-	rb_bug("non-initialized struct");
+	rb_raise(rb_eTypeError, "uninitialized struct");
+    }
+    if (TYPE(members) != T_ARRAY) {
+	rb_raise(rb_eTypeError, "corrupted struct");
     }
     return members;
 }
@@ -252,7 +255,7 @@ rb_struct_define(name, va_alist)
     ary = rb_ary_new();
 
     va_init_list(ar, name);
-    while (mem = va_arg(ar, char*)) {
+    while ((mem = va_arg(ar, char*)) != 0) {
 	ID slot = rb_intern(mem);
 	rb_ary_push(ary, ID2SYM(slot));
     }
@@ -307,18 +310,13 @@ rb_struct_s_def(argc, argv, klass)
     ID id;
 
     rb_scan_args(argc, argv, "1*", &name, &rest);
+    if (!NIL_P(name) && SYMBOL_P(name)) {
+	rb_ary_unshift(rest, name);
+	name = Qnil;
+    }
     for (i=0; i<RARRAY(rest)->len; i++) {
 	id = rb_to_id(RARRAY(rest)->ptr[i]);
 	RARRAY(rest)->ptr[i] = ID2SYM(id);
-    }
-    if (!NIL_P(name)) {
-	VALUE tmp = rb_check_string_type(name);
-
-	if (NIL_P(tmp)) {
-	    id = rb_to_id(name);
-	    rb_ary_unshift(rest, ID2SYM(id));
-	    name = Qnil;
-	}
     }
     st = make_struct(name, rest, klass);
     if (rb_block_given_p()) {
@@ -428,6 +426,7 @@ rb_struct_each(s)
 {
     long i;
 
+    RETURN_ENUMERATOR(s, 0, 0);
     for (i=0; i<RSTRUCT(s)->len; i++) {
 	rb_yield(RSTRUCT(s)->ptr[i]);
     }
@@ -459,6 +458,7 @@ rb_struct_each_pair(s)
     VALUE members;
     long i;
 
+    RETURN_ENUMERATOR(s, 0, 0);
     members = rb_struct_members(s);
     for (i=0; i<RSTRUCT(s)->len; i++) {
 	rb_yield_values(2, rb_ary_entry(members, i), RSTRUCT(s)->ptr[i]);
@@ -470,7 +470,7 @@ static VALUE
 inspect_struct(s)
     VALUE s;
 {
-    char *cname = rb_class2name(rb_obj_class(s));
+    const char *cname = rb_class2name(rb_obj_class(s));
     VALUE str, members;
     long i;
 
@@ -481,7 +481,7 @@ inspect_struct(s)
     for (i=0; i<RSTRUCT(s)->len; i++) {
 	VALUE slot;
 	ID id;
-	char *p;
+	const char *p;
 
 	if (i > 0) {
 	    rb_str_cat2(str, ", ");
@@ -517,7 +517,7 @@ rb_struct_inspect(s)
     VALUE s;
 {
     if (rb_inspecting_p(s)) {
-	char *cname = rb_class2name(rb_obj_class(s));
+	const char *cname = rb_class2name(rb_obj_class(s));
 	size_t len = strlen(cname) + 14;
 	VALUE str = rb_str_new(0, len);
 
@@ -557,8 +557,9 @@ rb_struct_init_copy(copy, s)
     if (!rb_obj_is_instance_of(s, rb_obj_class(copy))) {
 	rb_raise(rb_eTypeError, "wrong argument class");
     }
-    RSTRUCT(copy)->ptr = ALLOC_N(VALUE, RSTRUCT(s)->len);
-    RSTRUCT(copy)->len = RSTRUCT(s)->len;
+    if (RSTRUCT(copy)->len != RSTRUCT(s)->len) {
+	rb_raise(rb_eTypeError, "struct size mismatch");
+    }
     MEMCPY(RSTRUCT(copy)->ptr, RSTRUCT(s)->ptr, VALUE, RSTRUCT(copy)->len);
 
     return copy;

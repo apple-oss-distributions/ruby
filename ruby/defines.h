@@ -3,7 +3,7 @@
   defines.h -
 
   $Author: knu $
-  $Date: 2007-02-25 02:52:08 +0900 (Sun, 25 Feb 2007) $
+  $Date: 2008-05-19 00:02:36 +0900 (Mon, 19 May 2008) $
   created at: Wed May 18 00:21:44 JST 1994
 
 ************************************************/
@@ -102,7 +102,7 @@ void xfree _((void*));
 #endif
 #endif
 
-#if defined(__BIG_ENDIAN__) || defined(__LITTLE_ENDIAN__)
+#if defined(__NeXT__) || defined(__APPLE__)
 /* Do not trust WORDS_BIGENDIAN from configure since -arch compiler flag may
    result in a different endian.  Instead trust __BIG_ENDIAN__ and
    __LITTLE_ENDIAN__ which are set correctly by -arch. */
@@ -221,9 +221,7 @@ flush_register_windows(void)
 #endif
 # if defined(__sparc_v9__) || defined(__sparcv9) || defined(__arch64__)
 	("flushw")
-# elif defined(linux) || defined(__linux__)
-	("ta  0x83")
-# else /* Solaris, OpenBSD, NetBSD, etc. */
+# else
 	("ta  0x03")
 # endif /* trap always to flush register windows if we are on a Sparc system */
 	;
@@ -254,6 +252,14 @@ void rb_ia64_flushrs(void);
 
 #if defined(DOSISH) && !defined(__human68k__) && !defined(__EMX__)
 #define ENV_IGNORECASE
+#endif
+
+#ifndef CASEFOLD_FILESYSTEM
+# if defined DOSISH || defined __VMS
+#   define CASEFOLD_FILESYSTEM 1
+# else
+#   define CASEFOLD_FILESYSTEM 0
+# endif
 #endif
 
 #ifndef DLEXT_MAXLEN

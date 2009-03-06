@@ -1,5 +1,5 @@
 /*
- * $Id: ossl.h 11708 2007-02-12 23:01:19Z shyouhei $
+ * $Id: ossl.h 17656 2008-06-29 08:16:02Z shyouhei $
  * 'OpenSSL for Ruby' project
  * Copyright (C) 2001-2002  Michal Rokos <m.rokos@sh.cvut.cz>
  * All rights reserved.
@@ -15,6 +15,11 @@
 
 #if defined(__cplusplus)
 extern "C" {
+#endif
+
+#if 0
+  mOSSL = rb_define_module("OpenSSL");
+  mX509 = rb_define_module_under(mOSSL, "X509");
 #endif
 
 /*
@@ -40,8 +45,12 @@ extern "C" {
 #endif
 
 #if defined(_WIN32)
-#  define OpenFile WINAPI_OpenFile
 #  define OSSL_NO_CONF_API 1
+#  ifdef USE_WINSOCK2
+#    include <winsock2.h>
+#  else
+#    include <winsock.h>
+#  endif
 #endif
 #include <errno.h>
 #include <openssl/err.h>
@@ -63,9 +72,6 @@ extern "C" {
 #if defined(HAVE_OPENSSL_OCSP_H)
 #  define OSSL_OCSP_ENABLED
 #  include <openssl/ocsp.h>
-#endif
-#if defined(_WIN32)
-#  undef OpenFile
 #endif
 
 /*
@@ -117,11 +123,10 @@ VALUE ossl_x509crl_sk2ary(STACK_OF(X509_CRL) *crl);
 VALUE ossl_buf2str(char *buf, int len);
 #define ossl_str_adjust(str, p) \
 do{\
-    int len = RSTRING(str)->len;\
-    int newlen = (p) - (unsigned char*)RSTRING(str)->ptr;\
+    int len = RSTRING_LEN(str);\
+    int newlen = (p) - (unsigned char*)RSTRING_PTR(str);\
     assert(newlen <= len);\
-    RSTRING(str)->len = newlen;\
-    RSTRING(str)->ptr[newlen] = 0;\
+    rb_str_set_len(str, newlen);\
 }while(0)
 
 /*
@@ -202,6 +207,7 @@ void ossl_debug(const char *, ...);
 #include "ossl_ocsp.h"
 #include "ossl_pkcs12.h"
 #include "ossl_pkcs7.h"
+#include "ossl_pkcs5.h"
 #include "ossl_pkey.h"
 #include "ossl_rand.h"
 #include "ossl_ssl.h"

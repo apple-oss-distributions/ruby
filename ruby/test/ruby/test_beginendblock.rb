@@ -13,9 +13,8 @@ class TestBeginEndBlock < Test::Unit::TestCase
   def test_beginendblock
     ruby = EnvUtil.rubybin
     target = File.join(DIR, 'beginmainend.rb')
-    io = IO.popen("#{q(ruby)} #{q(target)}")
-    assert_equal(%w(b1 b2-1 b2 main b3-1 b3 b4 e1 e4 e3 e2 e4-2 e4-1 e1-1 e4-1-1), io.read.split)
-    io.close
+    result = IO.popen("#{q(ruby)} #{q(target)}"){|io|io.read}
+    assert_equal(%w(b1 b2-1 b2 main b3-1 b3 b4 e1 e4 e3 e2 e4-2 e4-1 e1-1 e4-1-1), result.split)
   end
 
   def test_begininmethod
@@ -69,19 +68,31 @@ EOW
 
   def test_should_propagate_exit_code
     ruby = EnvUtil.rubybin
-    assert_equal false, system("#{q(ruby)} -e 'at_exit{exit 2}'")
+    assert_equal false, system(ruby, '-e', 'at_exit{exit 2}')
     assert_equal 2, $?.exitstatus
     assert_nil $?.termsig
   end
 
   def test_should_propagate_signaled
     ruby = EnvUtil.rubybin
-    out = IO.popen("#{q(ruby)} -e 'STDERR.reopen(STDOUT);" \
-		   "at_exit{Process.kill(:INT, $$)}'"){|f|
+    out = IO.popen("#{ruby} #{File.dirname(__FILE__)}/suicide.rb"){|f|
       f.read
     }
     assert_match /Interrupt$/, out
+    Process.kill(0, 0) rescue return # check if signal works
     assert_nil $?.exitstatus
     assert_equal Signal.list["INT"], $?.termsig
+  end
+
+  def test_begin_and_eval
+    $test_begin_and_eval = :ok
+    begin
+      eval("BEGIN{$test_begin_and_eval = :ng}\n_/a:a")
+    rescue SyntaxError
+      x1 = x2 = $test_begin_and_eval
+      eval("x2 = $test_begin_and_eval")
+    end
+    assert_equal(:ok, x1)
+    assert_equal(:ok, x2)
   end
 end

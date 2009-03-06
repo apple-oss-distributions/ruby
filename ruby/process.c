@@ -3,7 +3,7 @@
   process.c -
 
   $Author: shyouhei $
-  $Date: 2007-05-23 07:32:16 +0900 (Wed, 23 May 2007) $
+  $Date: 2008-06-29 18:34:43 +0900 (Sun, 29 Jun 2008) $
   created at: Tue Aug 10 14:30:50 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -42,7 +42,7 @@ struct timeval rb_time_interval _((VALUE));
 #ifdef HAVE_SYS_WAIT_H
 # include <sys/wait.h>
 #endif
-#ifdef HAVE_GETPRIORITY
+#ifdef HAVE_SYS_RESOURCE_H
 # include <sys/resource.h>
 #endif
 #include "st.h"
@@ -96,12 +96,14 @@ static VALUE S_Tms;
 #undef HAVE_SETRGID
 #endif
 
-#if defined(__bsdi__)
-#define BROKEN_SETREUID 1
-#define BROKEN_SETREGID 1
+#ifdef BROKEN_SETREUID
+#define setreuid ruby_setreuid
+#endif
+#ifdef BROKEN_SETREGID
+#define setregid ruby_setregid
 #endif
 
-#if defined(HAVE_44BSD_SETUID)
+#if defined(HAVE_44BSD_SETUID) || defined(__MacOS_X__)
 #if !defined(USE_SETREUID) && !defined(BROKEN_SETREUID)
 #define OBSOLETE_SETREUID 1
 #endif
@@ -109,6 +111,9 @@ static VALUE S_Tms;
 #define OBSOLETE_SETREGID 1
 #endif
 #endif
+
+#define preserving_errno(stmts) \
+	do {int saved_errno = errno; stmts; errno = saved_errno;} while (0)
 
 
 /*
@@ -838,23 +843,22 @@ proc_waitall()
 }
 
 static VALUE
-detach_process_watcher(pid_p)
-    int *pid_p;
+detach_process_watcher(arg)
+    void *arg;
 {
-    int cpid, status;
+    int pid = (int)(VALUE)arg, status;
 
-    for (;;) {
-	cpid = rb_waitpid(*pid_p, &status, WNOHANG);
-	if (cpid != 0) return Qnil;
+    while (rb_waitpid(pid, &status, WNOHANG) == 0) {
 	rb_thread_sleep(1);
     }
+    return rb_last_status;
 }
 
 VALUE
 rb_detach_process(pid)
     int pid;
 {
-    return rb_thread_create(detach_process_watcher, (void*)&pid);
+    return rb_thread_create(detach_process_watcher, (void*)(VALUE)pid);
 }
 
 
@@ -872,6 +876,11 @@ rb_detach_process(pid)
  *  only when you do not intent to explicitly wait for the child to
  *  terminate.  <code>detach</code> only checks the status
  *  periodically (currently once each second).
+ *
+ *  The waiting thread returns the exit status of the detached process
+ *  when it terminates, so you can use <code>Thread#join</code> to
+ *  know the result.  If specified _pid_ is not a valid child process
+ *  ID, the thread returns +nil+ immediately.
  *
  *  In this first example, we don't reap the first child process, so
  *  it appears as a zombie in the process status display.
@@ -981,9 +990,8 @@ proc_exec_v(argv, prog)
     }
 #endif /* MSDOS or __human68k__ or __EMX__ */
     before_exec();
-    rb_thread_cancel_timer();
     execv(prog, argv);
-    after_exec();
+    preserving_errno(after_exec());
     return -1;
 }
 
@@ -1016,9 +1024,11 @@ int
 rb_proc_exec(str)
     const char *str;
 {
+#ifndef _WIN32
     const char *s = str;
     char *ss, *t;
     char **argv, **a;
+#endif
 
     while (*str && ISSPACE(*str))
 	str++;
@@ -1052,7 +1062,7 @@ rb_proc_exec(str)
 #else
 	    before_exec();
 	    execl("/bin/sh", "sh", "-c", str, (char *)NULL);
-	    after_exec();
+	    preserving_errno(after_exec());
 #endif
 #endif
 	    return -1;
@@ -1061,8 +1071,8 @@ rb_proc_exec(str)
     a = argv = ALLOCA_N(char*, (s-str)/2+2);
     ss = ALLOCA_N(char, s-str+1);
     strcpy(ss, str);
-    if (*a++ = strtok(ss, " \t")) {
-	while (t = strtok(NULL, " \t")) {
+    if ((*a++ = strtok(ss, " \t")) != 0) {
+	while ((t = strtok(NULL, " \t")) != 0) {
 	    *a++ = t;
 	}
 	*a = NULL;
@@ -1081,7 +1091,9 @@ proc_spawn_v(argv, prog)
     char **argv;
     char *prog;
 {
+#if defined(__human68k__)
     char *extension;
+#endif
     int status;
 
     if (!prog)
@@ -1181,6 +1193,53 @@ proc_spawn(sv)
 #endif
 #endif
 
+struct rb_exec_arg {
+    int argc;
+    VALUE *argv;
+    VALUE prog;
+};
+
+static void
+proc_prepare_args(e, argc, argv, prog)
+    struct rb_exec_arg *e;
+    int argc;
+    VALUE *argv;
+    VALUE prog;
+{
+    int i;
+
+    MEMZERO(e, struct rb_exec_arg, 1);
+    if (prog) {
+	SafeStringValue(prog);
+	StringValueCStr(prog);
+    }
+    for (i = 0; i < argc; i++) {
+	SafeStringValue(argv[i]);
+	StringValueCStr(argv[i]);
+    }
+    security(RSTRING(prog ? prog : argv[0])->ptr);
+    e->prog = prog;
+    e->argc = argc;
+    e->argv = argv;
+}
+
+static VALUE
+proc_exec_args(earg)
+    VALUE earg;
+{
+    struct rb_exec_arg *e = (struct rb_exec_arg *)earg;
+    int argc = e->argc;
+    VALUE *argv = e->argv;
+    VALUE prog = e->prog;
+
+    if (argc == 1 && prog == 0) {
+	return (VALUE)rb_proc_exec(RSTRING(argv[0])->ptr);
+    }
+    else {
+	return (VALUE)proc_exec_n(argc, argv, prog);
+    }
+}
+
 /*
  *  call-seq:
  *     exec(command [, arg, ...])
@@ -1213,8 +1272,10 @@ rb_f_exec(argc, argv)
 {
     VALUE prog = 0;
     VALUE tmp;
+    struct rb_exec_arg earg;
 
     if (argc == 0) {
+	rb_last_status = Qnil;
 	rb_raise(rb_eArgError, "wrong number of arguments");
     }
 
@@ -1227,15 +1288,8 @@ rb_f_exec(argc, argv)
 	argv[0] = RARRAY(tmp)->ptr[1];
 	SafeStringValue(prog);
     }
-    if (argc == 1 && prog == 0) {
-	VALUE cmd = argv[0];
-
-	SafeStringValue(cmd);
-	rb_proc_exec(RSTRING(cmd)->ptr);
-    }
-    else {
-	proc_exec_n(argc, argv, prog);
-    }
+    proc_prepare_args(&earg, argc, argv, prog);
+    proc_exec_args((VALUE)&earg);
     rb_sys_fail(RSTRING(argv[0])->ptr);
     return Qnil;		/* dummy */
 }
@@ -1355,12 +1409,12 @@ rb_syswait(pid)
 {
     static int overriding;
 #ifdef SIGHUP
-    RETSIGTYPE (*hfunc)_((int));
+    RETSIGTYPE (*hfunc)_((int)) = 0;
 #endif
 #ifdef SIGQUIT
-    RETSIGTYPE (*qfunc)_((int));
+    RETSIGTYPE (*qfunc)_((int)) = 0;
 #endif
-    RETSIGTYPE (*ifunc)_((int));
+    RETSIGTYPE (*ifunc)_((int)) = 0;
     int status;
     int i, hooked = Qfalse;
 
@@ -1469,6 +1523,9 @@ rb_f_system(argc, argv)
     }
 #if !defined(_WIN32)
     last_status_set(status == -1 ? 127 : status, 0);
+#else
+    if (status == -1)
+	last_status_set(0x7f << 8, 0);
 #endif
 #elif defined(__VMS)
     VALUE cmd;
@@ -1492,7 +1549,7 @@ rb_f_system(argc, argv)
 #else
     volatile VALUE prog = 0;
     int pid;
-    int i;
+    struct rb_exec_arg earg;
     RETSIGTYPE (*chfunc)(int);
 
     fflush(stdout);
@@ -1509,27 +1566,15 @@ rb_f_system(argc, argv)
 	prog = RARRAY(argv[0])->ptr[0];
 	argv[0] = RARRAY(argv[0])->ptr[1];
     }
+    proc_prepare_args(&earg, argc, argv, prog);
 
-    if (prog) {
-	SafeStringValue(prog);
-	StringValueCStr(prog);
-    }
-    for (i = 0; i < argc; i++) {
-	SafeStringValue(argv[i]);
-	StringValueCStr(argv[i]);
-    }
-    security(RSTRING(prog ? prog : argv[0])->ptr);
     chfunc = signal(SIGCHLD, SIG_DFL);
   retry:
     pid = fork();
     if (pid == 0) {
 	/* child process */
-	if (argc == 1 && prog == 0) {
-	    rb_proc_exec(RSTRING(argv[0])->ptr);
-	}
-	else {
-	    proc_exec_n(argc, argv, prog);
-	}
+	rb_thread_atfork();
+	rb_protect(proc_exec_args, (VALUE)&earg, NULL);
 	_exit(127);
     }
     if (pid < 0) {
@@ -1591,6 +1636,10 @@ rb_f_sleep(argc, argv)
 }
 
 
+#if defined(SIGCLD) && !defined(SIGCHLD)
+# define SIGCHLD SIGCLD
+#endif
+
 /*
  *  call-seq:
  *     Process.getpgrp   => integer
@@ -1602,14 +1651,12 @@ rb_f_sleep(argc, argv)
  *     Process.getpgrp      #=> 25527
  */
 
-#if defined(SIGCLD) && !defined(SIGCHLD)
-# define SIGCHLD SIGCLD
-#endif
-
 static VALUE
 proc_getpgrp()
 {
+#if defined(HAVE_GETPGRP) && defined(GETPGRP_VOID)
     int pgrp;
+#endif
 
     rb_secure(2);
 #if defined(HAVE_GETPGRP) && defined(GETPGRP_VOID)
@@ -3535,6 +3582,7 @@ Init_process()
 #endif
 #endif
 
+    rb_define_singleton_method(rb_mProcess, "exec", rb_f_exec, -1);
     rb_define_singleton_method(rb_mProcess, "fork", rb_f_fork, 0);
     rb_define_singleton_method(rb_mProcess, "exit!", rb_f_exit_bang, -1);
     rb_define_singleton_method(rb_mProcess, "exit", rb_f_exit, -1);   /* in eval.c */
@@ -3592,15 +3640,18 @@ Init_process()
     rb_define_module_function(rb_mProcess, "getrlimit", proc_getrlimit, 1);
     rb_define_module_function(rb_mProcess, "setrlimit", proc_setrlimit, -1);
 #ifdef RLIM2NUM
-#ifdef RLIM_INFINITY
-    rb_define_const(rb_mProcess, "RLIM_INFINITY", RLIM2NUM(RLIM_INFINITY));
-#endif
+    {
+        VALUE inf = RLIM2NUM(RLIM_INFINITY), v;
+        rb_define_const(rb_mProcess, "RLIM_INFINITY", inf);
 #ifdef RLIM_SAVED_MAX
-    rb_define_const(rb_mProcess, "RLIM_SAVED_MAX", RLIM2NUM(RLIM_SAVED_MAX));
+        v = RLIM_INFINITY == RLIM_SAVED_MAX ? inf : RLIM2NUM(RLIM_SAVED_MAX);
+        rb_define_const(rb_mProcess, "RLIM_SAVED_MAX", v);
 #endif
 #ifdef RLIM_SAVED_CUR
-    rb_define_const(rb_mProcess, "RLIM_SAVED_CUR", RLIM2NUM(RLIM_SAVED_CUR));
+        v = RLIM_INFINITY == RLIM_SAVED_CUR ? inf : RLIM2NUM(RLIM_SAVED_CUR);
+        rb_define_const(rb_mProcess, "RLIM_SAVED_CUR", v);
 #endif
+    }
 #ifdef RLIMIT_CORE
     rb_define_const(rb_mProcess, "RLIMIT_CORE", INT2FIX(RLIMIT_CORE));
 #endif
@@ -3670,8 +3721,8 @@ Init_process()
     rb_define_module_function(rb_mProcGID, "change_privilege", p_gid_change_privilege, 1);
     rb_define_module_function(rb_mProcUID, "grant_privilege", p_uid_grant_privilege, 1);
     rb_define_module_function(rb_mProcGID, "grant_privilege", p_gid_grant_privilege, 1);
-    rb_define_alias(rb_mProcUID, "eid=", "grant_privilege");
-    rb_define_alias(rb_mProcGID, "eid=", "grant_privilege");
+    rb_define_alias(rb_singleton_class(rb_mProcUID), "eid=", "grant_privilege");
+    rb_define_alias(rb_singleton_class(rb_mProcGID), "eid=", "grant_privilege");
     rb_define_module_function(rb_mProcUID, "re_exchange", p_uid_exchange, 0);
     rb_define_module_function(rb_mProcGID, "re_exchange", p_gid_exchange, 0);
     rb_define_module_function(rb_mProcUID, "re_exchangeable?", p_uid_exchangeable, 0);
