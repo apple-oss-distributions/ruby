@@ -154,18 +154,17 @@ def extmake(target)
       begin
 	$extconf_h = nil
 	ok &&= extract_makefile(makefile)
+	conf = ["#{$srcdir}/makefile.rb", "#{$srcdir}/extconf.rb"].find {|f| File.exist?(f)}
 	if (($extconf_h && !File.exist?($extconf_h)) ||
 	    !(t = modified?(makefile, MTIMES)) ||
-	    ["#{$srcdir}/makefile.rb", "#{$srcdir}/extconf.rb", "#{$srcdir}/depend"].any? {|f| modified?(f, [t])})
+	    [conf, "#{$srcdir}/depend"].any? {|f| modified?(f, [t])})
         then
 	  ok = false
           init_mkmf
 	  Logging::logfile 'mkmf.log'
 	  rm_f makefile
-	  if File.exist?($0 = "#{$srcdir}/makefile.rb")
-	    load $0
-	  elsif File.exist?($0 = "#{$srcdir}/extconf.rb")
-	    load $0
+	  if conf
+	    load $0 = conf
 	  else
 	    create_makefile(target)
 	  end
@@ -348,7 +347,7 @@ end
 
 EXEEXT = CONFIG['EXEEXT']
 if CROSS_COMPILING
-  $ruby = CONFIG['MINIRUBY']
+  $ruby = $mflags.defined?("MINIRUBY") || CONFIG['MINIRUBY']
 elsif sep = config_string('BUILD_FILE_SEPARATOR')
   $ruby = "$(topdir:/=#{sep})#{sep}miniruby" + EXEEXT
 else

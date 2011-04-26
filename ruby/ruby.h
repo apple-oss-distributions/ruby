@@ -342,6 +342,7 @@ struct RFloat {
     struct RBasic basic;
     double value;
 };
+#define RFLOAT_VALUE(v) (RFLOAT(v)->value)
 
 #define ELTS_SHARED FL_USER2
 
@@ -356,6 +357,7 @@ struct RString {
 };
 #define RSTRING_PTR(s) (RSTRING(s)->ptr)
 #define RSTRING_LEN(s) (RSTRING(s)->len)
+#define RSTRING_END(s) (RSTRING_PTR(s)+RSTRING_LEN(s))
 
 struct RArray {
     struct RBasic basic;
@@ -375,6 +377,8 @@ struct RRegexp {
     long len;
     char *str;
 };
+#define RREGEXP_SRC_PTR(r) (RREGEXP(r)->src)
+#define RREGEXP_SRC_LEN(r) (RREGEXP(r)->len)
 
 struct RHash {
     struct RBasic basic;
@@ -437,6 +441,12 @@ struct RBignum {
     long len;
     void *digits;
 };
+#define RBIGNUM_SIGN(b)       (RBIGNUM(b)->sign)
+#define RBIGNUM_SET_SIGN(b,s) (RBIGNUM(b)->sign = (s))
+#define RBIGNUM_POSITIVE_P(b) RBIGNUM_SIGN(b)
+#define RBIGNUM_NEGATIVE_P(b) (!RBIGNUM_SIGN(b))
+#define RBIGNUM_LEN(b)        (RBIGNUM(b)->len)
+#define RBIGNUM_DIGITS(b)     (RBIGNUM(b)->digits)
 
 #define R_CAST(st)   (struct st*)
 #define RBASIC(obj)  (R_CAST(RBasic)(obj))
@@ -765,19 +775,6 @@ int is_ruby_native_thread _((void));
 #ifdef HAVE_NATIVETHREAD_KILL
 void ruby_native_thread_kill _((int));
 #endif
-
-
-typedef unsigned int rb_threadswitch_event_t;
-
-#define RUBY_THREADSWITCH_INIT 0x01
-#define RUBY_THREADSWITCH_FREE 0x02
-#define RUBY_THREADSWITCH_SAVE 0x04
-#define RUBY_THREADSWITCH_RESTORE 0x08
-
-typedef void (*rb_threadswitch_hook_func_t) _((rb_threadswitch_event_t,VALUE));
-
-void *rb_add_threadswitch_hook _((rb_threadswitch_hook_func_t func));
-void rb_remove_threadswitch_hook _((void *handle));
 
 #if defined(__cplusplus)
 #if 0

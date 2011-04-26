@@ -12,11 +12,17 @@ class TestMarshal < Test::Unit::TestCase
   include MarshalTestLib
 
   def encode(o)
+    stress, GC.stress = GC.stress, true
     Marshal.dump(o)
+  ensure
+    GC.stress = stress
   end
 
   def decode(s)
+    stress, GC.stress = GC.stress, true
     Marshal.load(s)
+  ensure
+    GC.stress = stress
   end
 
   def fact(n)
@@ -64,5 +70,42 @@ class TestMarshal < Test::Unit::TestCase
       Marshal.load(data)
     }
     assert_equal("marshal data too short", e.message)
+  end
+
+  class DumpTest
+    def marshal_dump
+      loop { Thread.pass }
+    end
+  end
+
+  class LoadTest
+    def marshal_dump
+      nil
+    end
+    def marshal_load(obj)
+      loop { Thread.pass }
+    end
+  end
+
+  def test_context_switch
+    o = DumpTest.new
+    Thread.new { Marshal.dump(o) }
+    GC.start
+    assert(true, '[ruby-dev:39425]')
+
+    o = LoadTest.new
+    m = Marshal.dump(o)
+    Thread.new { Marshal.load(m) }
+    GC.start
+    assert(true, '[ruby-dev:39425]')
+  end
+
+  def test_taint
+    x = Object.new
+    x.taint
+    s = Marshal.dump(x)
+    assert_equal(true, s.tainted?)
+    y = Marshal.load(s)
+    assert_equal(true, y.tainted?)
   end
 end

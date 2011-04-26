@@ -3,7 +3,7 @@
   numeric.c -
 
   $Author: shyouhei $
-  $Date: 2008-08-04 13:36:00 +0900 (Mon, 04 Aug 2008) $
+  $Date: 2009-11-17 15:31:41 +0900 (Tue, 17 Nov 2009) $
   created at: Fri Aug 13 18:33:09 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -62,6 +62,8 @@
 #ifndef DBL_EPSILON
 #define DBL_EPSILON 2.2204460492503131e-16
 #endif
+
+extern double round _((double));
 
 #ifndef HAVE_ROUND
 double
@@ -1427,6 +1429,33 @@ num_truncate(num)
 }
 
 
+int ruby_float_step _((VALUE from, VALUE to, VALUE step, int excl));
+
+int
+ruby_float_step(from, to, step, excl)
+    VALUE from, to, step;
+    int excl;
+{
+    if (TYPE(from) == T_FLOAT || TYPE(to) == T_FLOAT || TYPE(step) == T_FLOAT) {
+	const double epsilon = DBL_EPSILON;
+	double beg = NUM2DBL(from);
+	double end = NUM2DBL(to);
+	double unit = NUM2DBL(step);
+	double n = (end - beg)/unit;
+	double err = (fabs(beg) + fabs(end) + fabs(end-beg)) / fabs(unit) * epsilon;
+	long i;
+
+	if (err>0.5) err=0.5;
+	n = floor(n + err);
+	if (!excl) n++;
+	for (i=0; i<n; i++) {
+	    rb_yield(rb_float_new(i*unit+beg));
+	}
+	return Qtrue;
+    }
+    return Qfalse;
+}
+
 /*
  *  call-seq:
  *     num.step(limit, step ) {|i| block }     => num
@@ -1501,22 +1530,7 @@ num_step(argc, argv, from)
 	    }
 	}
     }
-    else if (TYPE(from) == T_FLOAT || TYPE(to) == T_FLOAT || TYPE(step) == T_FLOAT) {
-	const double epsilon = DBL_EPSILON;
-	double beg = NUM2DBL(from);
-	double end = NUM2DBL(to);
-	double unit = NUM2DBL(step);
-	double n = (end - beg)/unit;
-	double err = (fabs(beg) + fabs(end) + fabs(end-beg)) / fabs(unit) * epsilon;
-	long i;
-
-	if (err>0.5) err=0.5;
-	n = floor(n + err) + 1;
-	for (i=0; i<n; i++) {
-	    rb_yield(rb_float_new(i*unit+beg));
-	}
-    }
-    else {
+    else if (!ruby_float_step(from, to, step, Qfalse)) {
 	VALUE i = from;
 	ID cmp;
 

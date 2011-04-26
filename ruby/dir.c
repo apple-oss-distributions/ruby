@@ -2,8 +2,8 @@
 
   dir.c -
 
-  $Author: knu $
-  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2009-02-04 14:27:05 +0900 (Wed, 04 Feb 2009) $
   created at: Wed Jan  5 09:51:01 JST 1994
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -16,6 +16,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -1660,7 +1661,7 @@ dir_globs(argc, argv, flags)
     for (i = 0; i < argc; ++i) {
 	int status;
 	VALUE str = argv[i];
-	StringValue(str);
+	SafeStringValue(str);
 	status = push_glob(ary, RSTRING(str)->ptr, flags);
 	if (status) GLOB_JUMP_TAG(status);
     }
@@ -2002,4 +2003,9 @@ Init_Dir()
     rb_file_const("FNM_DOTMATCH", INT2FIX(FNM_DOTMATCH));
     rb_file_const("FNM_CASEFOLD", INT2FIX(FNM_CASEFOLD));
     rb_file_const("FNM_SYSCASE", INT2FIX(FNM_SYSCASE));
+
+    char buf[MAXPATHLEN];
+    const size_t buflen = confstr(_CS_DARWIN_USER_TEMP_DIR, buf, sizeof buf);
+    VALUE str = buflen > 0 ? rb_obj_freeze(rb_str_new2(buf)) : Qnil;
+    rb_define_const(rb_cDir, "NS_TMPDIR", str);
 }
