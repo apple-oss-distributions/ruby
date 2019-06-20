@@ -50,7 +50,7 @@ class Gem::Package::TarHeader
     :uid,
     :uname,
     :version,
-  ]
+  ].freeze
 
   ##
   # Pack format for a tar header
@@ -94,40 +94,47 @@ class Gem::Package::TarHeader
 
   attr_reader(*FIELDS)
 
+  EMPTY_HEADER = ("\0" * 512).freeze # :nodoc:
+
   ##
   # Creates a tar header from IO +stream+
 
   def self.from(stream)
     header = stream.read 512
-    empty = (header == "\0" * 512)
+    empty = (EMPTY_HEADER == header)
 
     fields = header.unpack UNPACK_FORMAT
 
     new :name     => fields.shift,
-        :mode     => fields.shift.oct,
-        :uid      => fields.shift.oct,
-        :gid      => fields.shift.oct,
-        :size     => fields.shift.oct,
-        :mtime    => fields.shift.oct,
-        :checksum => fields.shift.oct,
+        :mode     => strict_oct(fields.shift),
+        :uid      => strict_oct(fields.shift),
+        :gid      => strict_oct(fields.shift),
+        :size     => strict_oct(fields.shift),
+        :mtime    => strict_oct(fields.shift),
+        :checksum => strict_oct(fields.shift),
         :typeflag => fields.shift,
         :linkname => fields.shift,
         :magic    => fields.shift,
-        :version  => fields.shift.oct,
+        :version  => strict_oct(fields.shift),
         :uname    => fields.shift,
         :gname    => fields.shift,
-        :devmajor => fields.shift.oct,
-        :devminor => fields.shift.oct,
+        :devmajor => strict_oct(fields.shift),
+        :devminor => strict_oct(fields.shift),
         :prefix   => fields.shift,
 
         :empty => empty
+  end
+
+  def self.strict_oct(str)
+    return str.oct if str =~ /\A[0-7]*\z/
+    raise ArgumentError, "#{str.inspect} is not an octal string"
   end
 
   ##
   # Creates a new TarHeader using +vals+
 
   def initialize(vals)
-    unless vals[:name] && vals[:size] && vals[:prefix] && vals[:mode] then
+    unless vals[:name] && vals[:size] && vals[:prefix] && vals[:mode]
       raise ArgumentError, ":name, :size, :prefix and :mode required"
     end
 

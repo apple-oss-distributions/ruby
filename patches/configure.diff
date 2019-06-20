@@ -1,15 +1,6 @@
---- configure.orig	2013-12-15 17:29:21.000000000 -0800
-+++ configure	2013-12-15 17:30:05.000000000 -0800
-@@ -5050,7 +5050,7 @@ if test "$GCC" = yes; then
- esac
- 	done; }
- else
--    linker_flag=
-+    linker_flag=-Wl,
- fi
- 
- { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the linker is GNU ld" >&5
-@@ -5135,13 +5135,7 @@ $as_echo "failed" >&6; }
+--- configure.orig	2018-12-24 22:28:23.000000000 -0800
++++ configure	2019-01-13 22:40:05.000000000 -0800
+@@ -5978,13 +5978,7 @@ $as_echo_n "checking target architecture
  esac
      done
      target_archs="$universal_binary"
@@ -22,9 +13,9 @@
 -esac
 +    universal_binary=yes
      { $as_echo "$as_me:${as_lineno-$LINENO}: result: $target_archs" >&5
- $as_echo "$target_archs" >&6; }
+     colorize_result "$target_archs" ; }
  
-@@ -8841,20 +8835,15 @@ else
+@@ -11761,20 +11755,15 @@ else
  _ACEOF
  if ac_fn_c_try_compile "$LINENO"; then :
  

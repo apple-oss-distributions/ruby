@@ -14,9 +14,8 @@ ToolType	= Commands
 GnuAfterInstall = post-install install-plist install-irbrc install-rails-placeholder
 GnuNoBuild	= YES
 
-# ruby_atomic.h + LibreSSL
-Extra_CC_Flags = -DHAVE_GCC_ATOMIC_BUILTINS -iwithsysroot /usr/local/libressl/include
-Extra_LD_Flags = -L $(SDKROOT)/usr/local/libressl/lib
+# ruby_atomic.h
+Extra_CC_Flags = -DHAVE_GCC_ATOMIC_BUILTINS
 # don't use xcrun as xcrun_log will break configure -- keep it like this for rbconfig.rb
 Extra_Configure_Environment =
 comma := ,
@@ -28,7 +27,9 @@ Extra_Configure_Flags  = \
 	--with-sitedir=$(SITEDIR) \
 	--enable-shared \
 	--with-arch=$(subst $(space),$(comma),$(RC_ARCHS)) \
+	--with-openssl-dir=$(SDKROOT)/usr/local/libressl \
 	--with-out-ext=tk \
+	--disable-silent-rules \
 	ac_cv_func_getcontext=no \
 	ac_cv_func_setcontext=no \
 	ac_cv_func_utimensat=no \
@@ -59,21 +60,24 @@ AEP_ProjVers   = $(AEP_Project)-$(AEP_Version)
 AEP_Filename   = $(shell basename $(AEP_URL))
 AEP_ExtractDir = $(AEP_ProjVers)
 AEP_Patches    = \
-	ext_openssl_extconf.rb.diff \
+	0001-Revert-Support-Universal-Binary-for-macOS.patch \
 	configure.diff \
 	tool_config.guess.diff \
 	tool_mkconfig.rb.diff \
 	common.mk.diff \
 	message_tracing_main.c.diff \
 	lib_rubygems_defaults.rb.diff \
-	getaddrinfo-test.diff
+	getaddrinfo-test.diff \
+	empty_files_verifier.diff \
+	deprecate.diff
 
 MAJOR     = $(shell echo $(AEP_Version) | cut -d. -f1)
 MINOR     = $(shell echo $(AEP_Version) | cut -d. -f2)
+TEENY     = $(shell echo $(AEP_Version) | cut -d. -f3)
 #TEENY     = $(shell echo $(AEP_Version) | $(SED) -e 's:-p.*::' | cut -d. -f3)
 VERSION   = $(MAJOR).$(MINOR)
 VERSION0  = $(MAJOR).$(MINOR).0
-#VERSION3  = $(MAJOR).$(MINOR).$(TEENY)
+VERSION3  = $(MAJOR).$(MINOR).$(TEENY)
 
 ConfigStamp2 = $(ConfigStamp)2
 
@@ -136,7 +140,7 @@ post-install:
 		$(MV) $$i $(DSTROOT)/$(FW_VERSION_DIR)/Ruby || exit 1; \
 	done
 	(cd $(DSTROOT)$(FW_VERSION_DIR)$(USRLIBDIR); $(LN) -vsh ../../Ruby $$(readlink libruby.dylib))
-	sh -x $(SRCROOT)/reexport.sh "$(DSTROOT)$(USRLIBDIR)/libruby.$(VERSION0).dylib" "$(DSTROOT)$(FW_VERSION_DIR)/Ruby" "${VERSION0}" "${VERSION}"
+	sh -x $(SRCROOT)/reexport.sh "$(DSTROOT)$(USRLIBDIR)/libruby.$(VERSION).dylib" "$(DSTROOT)$(FW_VERSION_DIR)/Ruby" "${VERSION}" "${VERSION3}"
 	# rdar://problem/8937160
 	find $(DSTROOT) -type l -print0 | xargs -0 -t chmod -h go-w
 	$(INSTALL_DIRECTORY) $(DSTROOT)/$(MANDIR)/man1
@@ -190,3 +194,5 @@ install_source::
 	$(TOUCH) $(SRCROOT)/$(Project)/ext/win32ole/.document
 	$(RM) $(SRCROOT)/$(Project)/known_errors.inc
 	$(CP) $(SRCROOT)/known_errors.def $(SRCROOT)/$(Project)/defs/known_errors.def
+	# The LEGAL file incorrectly trips up the XBS license verifier.  It should just look at COPYING.
+	$(RM) $(SRCROOT)/$(Project)/LEGAL

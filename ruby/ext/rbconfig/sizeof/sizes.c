@@ -1,5 +1,14 @@
 #include "ruby/ruby.h"
 
+#if defined(HAVE_TYPE_SIG_ATOMIC_T)
+# include <signal.h>
+#endif
+
+#if defined(HAVE_TYPE_WINT_T) || defined(HAVE_TYPE_WCTRANS_T) || defined(HAVE_TYPE_WCTYPE_T)
+# include <wctype.h>
+#endif
+
+extern void Init_limits(void);
 void
 Init_sizeof(void)
 {
@@ -7,6 +16,7 @@ Init_sizeof(void)
     rb_define_const(rb_define_module("RbConfig"), "SIZEOF", s);
 
 #define DEFINE(type, size) rb_hash_aset(s, rb_str_new_cstr(#type), INT2FIX(SIZEOF_##size))
+#define DEFINE_SIZE(type) rb_hash_aset(s, rb_str_new_cstr(#type), INT2FIX(sizeof(type)))
 
 #if SIZEOF_INT != 0
     DEFINE(int, INT);
@@ -22,6 +32,9 @@ Init_sizeof(void)
 #endif
 #if SIZEOF___INT64 != 0
     DEFINE(__int64, __INT64);
+#endif
+#ifdef HAVE_TYPE___INT128
+    DEFINE_SIZE(__int128);
 #endif
 #if SIZEOF_OFF_T != 0
     DEFINE(off_t, OFF_T);
@@ -71,6 +84,12 @@ Init_sizeof(void)
 #if SIZEOF_UINT64_T != 0
     DEFINE(uint64_t, UINT64_T);
 #endif
+#if SIZEOF_INT128_T != 0
+    DEFINE(int128_t, INT128_T);
+#endif
+#if SIZEOF_UINT128_T != 0
+    DEFINE(uint128_t, UINT128_T);
+#endif
 #if SIZEOF_INTPTR_T != 0
     DEFINE(intptr_t, INTPTR_T);
 #endif
@@ -80,96 +99,98 @@ Init_sizeof(void)
 #if SIZEOF_SSIZE_T != 0
     DEFINE(ssize_t, SSIZE_T);
 #endif
-#if SIZEOF_INT_LEAST8_T != 0
-    DEFINE(int_least8_t, INT_LEAST8_T);
+#ifdef HAVE_TYPE_INT_LEAST8_T
+    DEFINE_SIZE(int_least8_t);
 #endif
-#if SIZEOF_INT_LEAST16_T != 0
-    DEFINE(int_least16_t, INT_LEAST16_T);
+#ifdef HAVE_TYPE_INT_LEAST16_T
+    DEFINE_SIZE(int_least16_t);
 #endif
-#if SIZEOF_INT_LEAST32_T != 0
-    DEFINE(int_least32_t, INT_LEAST32_T);
+#ifdef HAVE_TYPE_INT_LEAST32_T
+    DEFINE_SIZE(int_least32_t);
 #endif
-#if SIZEOF_INT_LEAST64_T != 0
-    DEFINE(int_least64_t, INT_LEAST64_T);
+#ifdef HAVE_TYPE_INT_LEAST64_T
+    DEFINE_SIZE(int_least64_t);
 #endif
-#if SIZEOF_INT_FAST8_T != 0
-    DEFINE(int_fast8_t, INT_FAST8_T);
+#ifdef HAVE_TYPE_INT_FAST8_T
+    DEFINE_SIZE(int_fast8_t);
 #endif
-#if SIZEOF_INT_FAST16_T != 0
-    DEFINE(int_fast16_t, INT_FAST16_T);
+#ifdef HAVE_TYPE_INT_FAST16_T
+    DEFINE_SIZE(int_fast16_t);
 #endif
-#if SIZEOF_INT_FAST32_T != 0
-    DEFINE(int_fast32_t, INT_FAST32_T);
+#ifdef HAVE_TYPE_INT_FAST32_T
+    DEFINE_SIZE(int_fast32_t);
 #endif
-#if SIZEOF_INT_FAST64_T != 0
-    DEFINE(int_fast64_t, INT_FAST64_T);
+#ifdef HAVE_TYPE_INT_FAST64_T
+    DEFINE_SIZE(int_fast64_t);
 #endif
-#if SIZEOF_INTMAX_T != 0
-    DEFINE(intmax_t, INTMAX_T);
+#ifdef HAVE_TYPE_INTMAX_T
+    DEFINE_SIZE(intmax_t);
 #endif
-#if SIZEOF_SIG_ATOMIC_T != 0
-    DEFINE(sig_atomic_t, SIG_ATOMIC_T);
+#ifdef HAVE_TYPE_SIG_ATOMIC_T
+    DEFINE_SIZE(sig_atomic_t);
 #endif
-#if SIZEOF_WCHAR_T != 0
-    DEFINE(wchar_t, WCHAR_T);
+#ifdef HAVE_TYPE_WCHAR_T
+    DEFINE_SIZE(wchar_t);
 #endif
-#if SIZEOF_WINT_T != 0
-    DEFINE(wint_t, WINT_T);
+#ifdef HAVE_TYPE_WINT_T
+    DEFINE_SIZE(wint_t);
 #endif
-#if SIZEOF_WCTRANS_T != 0
-    DEFINE(wctrans_t, WCTRANS_T);
+#ifdef HAVE_TYPE_WCTRANS_T
+    DEFINE_SIZE(wctrans_t);
 #endif
-#if SIZEOF_WCTYPE_T != 0
-    DEFINE(wctype_t, WCTYPE_T);
+#ifdef HAVE_TYPE_WCTYPE_T
+    DEFINE_SIZE(wctype_t);
 #endif
-#if SIZEOF__BOOL != 0
-    DEFINE(_Bool, _BOOL);
+#ifdef HAVE_TYPE__BOOL
+    DEFINE_SIZE(_Bool);
 #endif
-#if SIZEOF_LONG_DOUBLE != 0
-    DEFINE(long double, LONG_DOUBLE);
+#ifdef HAVE_TYPE_LONG_DOUBLE
+    DEFINE_SIZE(long double);
 #endif
-#if SIZEOF_FLOAT__COMPLEX != 0
-    DEFINE(float _Complex, FLOAT__COMPLEX);
+#ifdef HAVE_TYPE_FLOAT__COMPLEX
+    DEFINE_SIZE(float _Complex);
 #endif
-#if SIZEOF_DOUBLE__COMPLEX != 0
-    DEFINE(double _Complex, DOUBLE__COMPLEX);
+#ifdef HAVE_TYPE_DOUBLE__COMPLEX
+    DEFINE_SIZE(double _Complex);
 #endif
-#if SIZEOF_LONG_DOUBLE__COMPLEX != 0
-    DEFINE(long double _Complex, LONG_DOUBLE__COMPLEX);
+#ifdef HAVE_TYPE_LONG_DOUBLE__COMPLEX
+    DEFINE_SIZE(long double _Complex);
 #endif
-#if SIZEOF_FLOAT__IMAGINARY != 0
-    DEFINE(float _Imaginary, FLOAT__IMAGINARY);
+#ifdef HAVE_TYPE_FLOAT__IMAGINARY
+    DEFINE_SIZE(float _Imaginary);
 #endif
-#if SIZEOF_DOUBLE__IMAGINARY != 0
-    DEFINE(double _Imaginary, DOUBLE__IMAGINARY);
+#ifdef HAVE_TYPE_DOUBLE__IMAGINARY
+    DEFINE_SIZE(double _Imaginary);
 #endif
-#if SIZEOF_LONG_DOUBLE__IMAGINARY != 0
-    DEFINE(long double _Imaginary, LONG_DOUBLE__IMAGINARY);
+#ifdef HAVE_TYPE_LONG_DOUBLE__IMAGINARY
+    DEFINE_SIZE(long double _Imaginary);
 #endif
-#if SIZEOF___INT128 != 0
-    DEFINE(__int128, __INT128);
+#ifdef HAVE_TYPE___INT128
+    DEFINE_SIZE(__int128);
 #endif
-#if SIZEOF___FLOAT128 != 0
-    DEFINE(__float128, __FLOAT128);
+#ifdef HAVE_TYPE___FLOAT128
+    DEFINE_SIZE(__float128);
 #endif
-#if SIZEOF__DECIMAL32 != 0
-    DEFINE(_Decimal32, _DECIMAL32);
+#ifdef HAVE_TYPE__DECIMAL32
+    DEFINE_SIZE(_Decimal32);
 #endif
-#if SIZEOF__DECIMAL64 != 0
-    DEFINE(_Decimal64, _DECIMAL64);
+#ifdef HAVE_TYPE__DECIMAL64
+    DEFINE_SIZE(_Decimal64);
 #endif
-#if SIZEOF__DECIMAL128 != 0
-    DEFINE(_Decimal128, _DECIMAL128);
+#ifdef HAVE_TYPE__DECIMAL128
+    DEFINE_SIZE(_Decimal128);
 #endif
-#if SIZEOF___M64 != 0
-    DEFINE(__m64, __M64);
+#ifdef HAVE_TYPE___M64
+    DEFINE_SIZE(__m64);
 #endif
-#if SIZEOF___M128 != 0
-    DEFINE(__m128, __M128);
+#ifdef HAVE_TYPE___M128
+    DEFINE_SIZE(__m128);
 #endif
-#if SIZEOF___FLOAT80 != 0
-    DEFINE(__float80, __FLOAT80);
+#ifdef HAVE_TYPE___FLOAT80
+    DEFINE_SIZE(__float80);
 #endif
+    OBJ_FREEZE(s);
 
 #undef DEFINE
+    Init_limits();
 }

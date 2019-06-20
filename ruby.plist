@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>OpenSourceImportDate</key>
-	<string>2016-12-01</string>
+	<string>2019-06-19</string>
 	<key>OpenSourceLicense</key>
 	<string>ruby</string>
 	<key>OpenSourceLicenseFile</key>
@@ -18,11 +18,11 @@
 	<key>OpenSourceProject</key>
 	<string>ruby</string>
 	<key>OpenSourceSHA256</key>
-	<string>73dd6ed896ff52d953b153b2cab359c87953ea77521878f1ee16c1e217cc46bcb253100debe61ba631e6ffa0bc773e592d603a374508ed5189a311136ccd8d20</string>
+	<string>11a83f85c03d3f0fc9b8a9b6cad1b2674f26c5aaa43ba858d4b0fcc2b54171e1</string>
 	<key>OpenSourceURL</key>
-	<string>https://cache.ruby-lang.org/pub/ruby/2.3/ruby-2.3.3.tar.xz</string>
+	<string>https://cache.ruby-lang.org/pub/ruby/2.6/ruby-2.6.3.tar.xz</string>
 	<key>OpenSourceVersion</key>
-	<string>2.3.3</string>
+	<string>2.6.3</string>
 	<key>OpenSourceWebsiteURL</key>
 	<string>http://www.ruby-lang.org/</string>
 </dict>

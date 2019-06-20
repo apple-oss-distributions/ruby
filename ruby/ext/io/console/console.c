@@ -297,6 +297,14 @@ ttymode(VALUE io, VALUE (*func)(VALUE), void (*setter)(conmode *, void *), void 
  *
  * will read and return a line without echo back and line editing.
  *
+ * The parameter +min+ specifies the minimum number of bytes that
+ * should be received when a read operation is performed. (default: 1)
+ *
+ * The parameter +time+ specifies the timeout in _seconds_ with a
+ * precision of 1/10 of a second. (default: 0)
+ *
+ * Refer to the manual page of termios for further details.
+ *
  * You must require 'io/console' to use this method.
  */
 static VALUE
@@ -313,6 +321,8 @@ console_raw(int argc, VALUE *argv, VALUE io)
  * Enables raw mode.
  *
  * If the terminal mode needs to be back, use io.raw { ... }.
+ *
+ * See IO#raw for details on the parameters.
  *
  * You must require 'io/console' to use this method.
  */
@@ -378,7 +388,7 @@ console_set_cooked(VALUE io)
 static VALUE
 getc_call(VALUE io)
 {
-    return rb_funcall2(io, id_getc, 0, 0);
+    return rb_funcallv(io, id_getc, 0, 0);
 }
 
 /*
@@ -386,6 +396,8 @@ getc_call(VALUE io)
  *   io.getch(min: nil, time: nil)       -> char
  *
  * Reads and returns a character in raw mode.
+ *
+ * See IO#raw for details on the parameters.
  *
  * You must require 'io/console' to use this method.
  */
@@ -521,16 +533,23 @@ console_set_winsize(VALUE io, VALUE size)
 #if defined _WIN32
     HANDLE wh;
     int newrow, newcol;
+    BOOL ret;
 #endif
     VALUE row, col, xpixel, ypixel;
     const VALUE *sz;
     int fd;
+    long sizelen;
 
     GetOpenFile(io, fptr);
     size = rb_Array(size);
-    rb_check_arity(RARRAY_LENINT(size), 2, 4);
+    if ((sizelen = RARRAY_LEN(size)) != 2 && sizelen != 4) {
+	rb_raise(rb_eArgError,
+		 "wrong number of arguments (given %ld, expected 2 or 4)",
+		 sizelen);
+    }
     sz = RARRAY_CONST_PTR(size);
-    row = sz[0], col = sz[1], xpixel = sz[2], ypixel = sz[3];
+    row = sz[0], col = sz[1], xpixel = ypixel = Qnil;
+    if (sizelen == 4) xpixel = sz[2], ypixel = sz[3];
     fd = GetWriteFD(fptr);
 #if defined TIOCSWINSZ
     ws.ws_row = ws.ws_col = ws.ws_xpixel = ws.ws_ypixel = 0;
@@ -552,17 +571,21 @@ console_set_winsize(VALUE io, VALUE size)
     if (!GetConsoleScreenBufferInfo(wh, &ws)) {
 	rb_syserr_fail(LAST_ERROR, "GetConsoleScreenBufferInfo");
     }
-    if ((ws.dwSize.X < newcol && (ws.dwSize.X = newcol, 1)) ||
-	(ws.dwSize.Y < newrow && (ws.dwSize.Y = newrow, 1))) {
-	if (!SetConsoleScreenBufferSize(wh, ws.dwSize)) {
-	    rb_syserr_fail(LAST_ERROR, "SetConsoleScreenBufferInfo");
-	}
-    }
+    ws.dwSize.X = newcol;
+    ret = SetConsoleScreenBufferSize(wh, ws.dwSize);
     ws.srWindow.Left = 0;
     ws.srWindow.Top = 0;
-    ws.srWindow.Right = newcol;
-    ws.srWindow.Bottom = newrow;
-    if (!SetConsoleWindowInfo(wh, FALSE, &ws.srWindow)) {
+    ws.srWindow.Right = newcol-1;
+    ws.srWindow.Bottom = newrow-1;
+    if (!SetConsoleWindowInfo(wh, TRUE, &ws.srWindow)) {
+	rb_syserr_fail(LAST_ERROR, "SetConsoleWindowInfo");
+    }
+    /* retry when shrinking buffer after shrunk window */
+    if (!ret && !SetConsoleScreenBufferSize(wh, ws.dwSize)) {
+	rb_syserr_fail(LAST_ERROR, "SetConsoleScreenBufferInfo");
+    }
+    /* remove scrollbar if possible */
+    if (!SetConsoleWindowInfo(wh, TRUE, &ws.srWindow)) {
 	rb_syserr_fail(LAST_ERROR, "SetConsoleWindowInfo");
     }
 #endif
@@ -718,15 +741,17 @@ console_key_pressed_p(VALUE io, VALUE k)
     }
     else {
 	const struct vktable *t;
+	const char *kn;
 	if (SYMBOL_P(k)) {
 	    k = rb_sym2str(k);
+	    kn = RSTRING_PTR(k);
 	}
 	else {
-	    StringValueCStr(k);
+	    kn = StringValuePtr(k);
 	}
-	t = console_win32_vk(RSTRING_PTR(k), RSTRING_LEN(k));
+	t = console_win32_vk(kn, RSTRING_LEN(k));
 	if (!t || (vk = (short)t->vk) == -1) {
-	    rb_raise(rb_eArgError, "unknown virtual key code: %"PRIsVALUE, k);
+	    rb_raise(rb_eArgError, "unknown virtual key code: % "PRIsVALUE, k);
 	}
     }
     return GetKeyState(vk) & 0x80 ? Qtrue : Qfalse;
@@ -844,7 +869,7 @@ console_dev(int argc, VALUE *argv, VALUE klass)
 static VALUE
 io_getch(int argc, VALUE *argv, VALUE io)
 {
-    return rb_funcall2(io, id_getc, argc, argv);
+    return rb_funcallv(io, id_getc, argc, argv);
 }
 
 #if ENABLE_IO_GETPASS
