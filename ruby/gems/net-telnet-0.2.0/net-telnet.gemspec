@@ -12,7 +12,7 @@ Gem::Specification.new do |s|
   s.date = "2018-07-25"
   s.description = "Provides telnet client functionality.".freeze
   s.email = ["hsbt@ruby-lang.org".freeze]
-  s.files = [".gitignore".freeze, ".travis.yml".freeze, "Gemfile".freeze, "LICENSE.txt".freeze, "README.md".freeze, "Rakefile".freeze, "bin/console".freeze, "bin/setup".freeze, "lib/net-telnet.rb".freeze, "lib/net/telnet.rb".freeze, "lib/net/telnet/version.rb".freeze, "net-telnet.gemspec".freeze]
+  s.files = [".travis.yml".freeze, "Gemfile".freeze, "LICENSE.txt".freeze, "README.md".freeze, "Rakefile".freeze, "bin/console".freeze, "bin/setup".freeze, "lib/net-telnet.rb".freeze, "lib/net/telnet.rb".freeze, "lib/net/telnet/version.rb".freeze, "net-telnet.gemspec".freeze]
   s.homepage = "https://github.com/ruby/net-telnet".freeze
   s.licenses = ["ruby".freeze]
   s.required_ruby_version = Gem::Requirement.new(">= 2.3.0".freeze)

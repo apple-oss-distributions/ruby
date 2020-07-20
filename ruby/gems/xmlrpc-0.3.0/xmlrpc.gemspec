@@ -12,7 +12,7 @@ Gem::Specification.new do |s|
   s.date = "2017-02-16"
   s.description = "XMLRPC is a lightweight protocol that enables remote procedure calls over HTTP.".freeze
   s.email = ["hsbt@ruby-lang.org".freeze]
-  s.files = [".gitignore".freeze, ".travis.yml".freeze, "Gemfile".freeze, "LICENSE.txt".freeze, "README.md".freeze, "Rakefile".freeze, "bin/console".freeze, "bin/setup".freeze, "lib/xmlrpc.rb".freeze, "lib/xmlrpc/base64.rb".freeze, "lib/xmlrpc/client.rb".freeze, "lib/xmlrpc/config.rb".freeze, "lib/xmlrpc/create.rb".freeze, "lib/xmlrpc/datetime.rb".freeze, "lib/xmlrpc/marshal.rb".freeze, "lib/xmlrpc/parser.rb".freeze, "lib/xmlrpc/server.rb".freeze, "lib/xmlrpc/utils.rb".freeze, "xmlrpc.gemspec".freeze]
+  s.files = [".travis.yml".freeze, "Gemfile".freeze, "LICENSE.txt".freeze, "README.md".freeze, "Rakefile".freeze, "bin/console".freeze, "bin/setup".freeze, "lib/xmlrpc.rb".freeze, "lib/xmlrpc/base64.rb".freeze, "lib/xmlrpc/client.rb".freeze, "lib/xmlrpc/config.rb".freeze, "lib/xmlrpc/create.rb".freeze, "lib/xmlrpc/datetime.rb".freeze, "lib/xmlrpc/marshal.rb".freeze, "lib/xmlrpc/parser.rb".freeze, "lib/xmlrpc/server.rb".freeze, "lib/xmlrpc/utils.rb".freeze, "xmlrpc.gemspec".freeze]
   s.homepage = "https://github.com/ruby/xmlrpc".freeze
   s.licenses = ["Ruby".freeze]
   s.required_ruby_version = Gem::Requirement.new(">= 2.3".freeze)
