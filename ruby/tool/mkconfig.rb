@@ -62,7 +62,7 @@ File.foreach "config.status" do |line|
     when /^(?:X|(?:MINI|RUN|(?:HAVE_)?BASE|BOOTSTRAP|BTEST)RUBY(?:_COMMAND)?$)/; next
     when /^INSTALLDOC|TARGET$/; next
     when /^DTRACE/; next
-    when /^MJIT_SUPPORT/; # pass
+    when /^MJIT_(CC|SUPPORT)/; # pass
     when /^MJIT_/; next
     when /^(?:MAJOR|MINOR|TEENY)$/; vars[name] = val; next
     when /^LIBRUBY_D?LD/; next
@@ -121,7 +121,7 @@ File.foreach "config.status" do |line|
       universal, val = val, 'universal' if universal
     when /^includedir$/
       val = "(ENV['SDKROOT'] || (File.exist?(File.join(CONFIG['prefix'],'include')) ? '' : %x(xcode-select --print-path >/dev/null 2>&1 && xcrun --sdk macosx --show-sdk-path 2>/dev/null).chomp)) + #{val}"
-    when /^(CXXFLAGS|LDFLAGS|CFLAGS|LDSHARED|LIBRUBY_LDSHARED)$/
+    when /^(CXXFLAGS|DLDFLAGS|LDFLAGS|CFLAGS|LDSHARED|LIBRUBY_LDSHARED)$/
       if universal
         # configure didn't strip -arch nor -m32/64 from CXXFLAGS
         # replace the first with ARCH_FLAG and delete the rest
@@ -258,7 +258,7 @@ print <<EOS if $unicode_emoji_version
   CONFIG["UNICODE_EMOJI_VERSION"] = #{$unicode_emoji_version.dump}
 EOS
 print <<EOS if /darwin/ =~ arch
-  CONFIG["SDKROOT"] = ENV["SDKROOT"] || "" # don't run xcrun everytime, usually useless.
+  CONFIG["SDKROOT"] = "\#{ENV['SDKROOT']}" # don't run xcrun every time, usually useless.
 EOS
 print <<EOS
   CONFIG["archdir"] = "$(rubyarchdir)"

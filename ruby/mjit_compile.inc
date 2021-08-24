@@ -363,7 +363,7 @@ switch (insn) {
         fprintf(f, "    const rb_serial_t ic_serial = (rb_serial_t)%"PRI_SERIALT_PREFIX"u;\n", ic_copy->ic_serial);
         fprintf(f, "    const st_index_t index = %"PRIuSIZE";\n", ic_copy->ic_value.index);
         fprintf(f, "    VALUE val = stack[%d];\n", b->stack_size - 1);
-        fprintf(f, "    if (LIKELY(RB_TYPE_P(obj, T_OBJECT) && ic_serial == RCLASS_SERIAL(RBASIC(obj)->klass) && index < ROBJECT_NUMIV(obj))) {\n");
+        fprintf(f, "    if (LIKELY(RB_TYPE_P(obj, T_OBJECT) && ic_serial == RCLASS_SERIAL(RBASIC(obj)->klass) && index < ROBJECT_NUMIV(obj) && !RB_OBJ_FROZEN(obj))) {\n");
         fprintf(f, "        VALUE *ptr = ROBJECT_IVPTR(obj);\n");
         fprintf(f, "        RB_OBJ_WRITE(obj, &ptr[index], val);\n");
         fprintf(f, "    }\n");
@@ -2446,7 +2446,12 @@ switch (insn) {
         b->stack_size += attr_sp_inc_branchif(dst);
     }
     fprintf(f, "}\n");
-    compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+    if (ALREADY_COMPILED_P(status, pos + insn_len(insn))) {
+        fprintf(f, "goto label_%d;\n", pos + insn_len(insn));
+    }
+    else {
+        compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+    }
     break;
   case BIN(branchunless):
     fprintf(f, "{\n");
@@ -2488,7 +2493,12 @@ switch (insn) {
         b->stack_size += attr_sp_inc_branchunless(dst);
     }
     fprintf(f, "}\n");
-    compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+    if (ALREADY_COMPILED_P(status, pos + insn_len(insn))) {
+        fprintf(f, "goto label_%d;\n", pos + insn_len(insn));
+    }
+    else {
+        compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+    }
     break;
   case BIN(branchnil):
     fprintf(f, "{\n");
@@ -2530,7 +2540,12 @@ switch (insn) {
         b->stack_size += attr_sp_inc_branchnil(dst);
     }
     fprintf(f, "}\n");
-    compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+    if (ALREADY_COMPILED_P(status, pos + insn_len(insn))) {
+        fprintf(f, "goto label_%d;\n", pos + insn_len(insn));
+    }
+    else {
+        compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+    }
     break;
   case BIN(opt_getinlinecache):
     fprintf(f, "{\n");
@@ -2573,7 +2588,12 @@ switch (insn) {
         b->stack_size += attr_sp_inc_opt_getinlinecache(dst, ic);
     }
     fprintf(f, "}\n");
-    compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+    if (ALREADY_COMPILED_P(status, pos + insn_len(insn))) {
+        fprintf(f, "goto label_%d;\n", pos + insn_len(insn));
+    }
+    else {
+        compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+    }
     break;
   case BIN(opt_setinlinecache):
     fprintf(f, "{\n");
@@ -2703,7 +2723,12 @@ switch (insn) {
         b->stack_size += attr_sp_inc_opt_case_dispatch(hash, else_offset);
     }
     fprintf(f, "}\n");
-    compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+    if (ALREADY_COMPILED_P(status, pos + insn_len(insn))) {
+        fprintf(f, "goto label_%d;\n", pos + insn_len(insn));
+    }
+    else {
+        compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+    }
     break;
   case BIN(opt_plus):
     fprintf(f, "{\n");

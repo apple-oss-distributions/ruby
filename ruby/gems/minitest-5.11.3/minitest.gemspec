@@ -17,19 +17,16 @@ Gem::Specification.new do |s|
   s.homepage = "https://github.com/seattlerb/minitest".freeze
   s.licenses = ["MIT".freeze]
   s.rdoc_options = ["--main".freeze, "README.rdoc".freeze]
-  s.rubygems_version = "2.7.6".freeze
+  s.rubygems_version = "3.1.2".freeze
   s.summary = "minitest provides a complete suite of testing facilities supporting TDD, BDD, mocking, and benchmarking".freeze
 
   if s.respond_to? :specification_version then
     s.specification_version = 4
+  end
 
-    if Gem::Version.new(Gem::VERSION) >= Gem::Version.new('1.2.0') then
-      s.add_development_dependency(%q<rdoc>.freeze, ["~> 4.0"])
-      s.add_development_dependency(%q<hoe>.freeze, ["~> 3.16"])
-    else
-      s.add_dependency(%q<rdoc>.freeze, ["~> 4.0"])
-      s.add_dependency(%q<hoe>.freeze, ["~> 3.16"])
-    end
+  if s.respond_to? :add_runtime_dependency then
+    s.add_development_dependency(%q<rdoc>.freeze, ["~> 4.0"])
+    s.add_development_dependency(%q<hoe>.freeze, ["~> 3.16"])
   else
     s.add_dependency(%q<rdoc>.freeze, ["~> 4.0"])
     s.add_dependency(%q<hoe>.freeze, ["~> 3.16"])
